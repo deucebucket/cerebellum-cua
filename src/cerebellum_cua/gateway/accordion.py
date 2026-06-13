@@ -22,8 +22,10 @@ from cerebellum_cua.errors import (
     ElementNotFoundError,
     InvalidLazyTokenError,
     SnapshotNotFoundError,
+    TokenBudgetExceededError,
 )
 from cerebellum_cua.gateway._hydrate import element_to_dict, semantics_to_list
+from cerebellum_cua.gateway.budget import TokenBudget
 from cerebellum_cua.gateway.tokens import LazyTokenCodec
 from cerebellum_cua.model import ChildStub, Element
 from cerebellum_cua.storage.base import StorageBackend
@@ -35,9 +37,17 @@ CHILD_PAGE_LIMIT = 500
 class Accordion:
     """Token-bounded lazy expansion of a persisted snapshot's element tree."""
 
-    def __init__(self, storage: StorageBackend, codec: LazyTokenCodec) -> None:
+    def __init__(
+        self,
+        storage: StorageBackend,
+        codec: LazyTokenCodec,
+        budget: TokenBudget | None = None,
+    ) -> None:
         self._storage = storage
         self._codec = codec
+        #: Defaults to an unbounded budget: responses are measured/annotated but
+        #: never rejected unless a ceiling is configured.
+        self._budget = budget or TokenBudget()
 
     # --- public operations ----------------------------------------------
     def get_initial_context(self, snapshot_id: int) -> dict[str, Any]:
@@ -53,11 +63,11 @@ class Accordion:
         hydrated = [
             self._hydrate(snapshot_id, el, max_depth=1) for el in roots
         ]
-        return {
+        return self._finalize({
             "snapshot_id": snapshot_id,
             "root_elements": hydrated,
             "total_roots": len(hydrated),
-        }
+        })
 
     def load_children(
         self,
@@ -97,12 +107,12 @@ class Accordion:
         expires_at = datetime.now(timezone.utc) + timedelta(
             seconds=self._codec.ttl_seconds
         )
-        return {
+        return self._finalize({
             "parent_row_id": parent_row_id,
             "children": hydrated,
             "has_more": len(children) > CHILD_PAGE_LIMIT,
             "token_expires_at": expires_at.isoformat(),
-        }
+        })
 
     def get_element(
         self,
@@ -142,9 +152,25 @@ class Accordion:
                 }
                 for rel in self._storage.get_relationships(snapshot_id, row_id)
             ]
-        return {"element": payload}
+        return self._finalize({"element": payload})
 
     # --- internals -------------------------------------------------------
+    def _finalize(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Annotate a response with ``estimated_tokens`` and enforce the ceiling.
+
+        The estimate is measured over the assembled payload; if a budget ceiling
+        is configured and the payload exceeds it, :class:`TokenBudgetExceededError`
+        (code 1009) is raised. With the default unbounded budget this only adds
+        the annotation and never rejects.
+        """
+        annotated = self._budget.annotate(payload)
+        if not self._budget.within(payload):
+            raise TokenBudgetExceededError(
+                estimated_tokens=annotated["estimated_tokens"],
+                max_tokens=self._budget.max_tokens,
+            )
+        return annotated
+
     def _fetch_roots(self, snapshot_id: int) -> list[Element]:
         """Roots are elements with no parent (metadata.parent_row_id is None)."""
         # ``get_children(snapshot_id, -1)`` returns nothing; the canonical root

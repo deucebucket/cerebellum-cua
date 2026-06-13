@@ -7,12 +7,20 @@ tree and never imports the uia layer.
 - :class:`LazyTokenCodec` — HS256 lazy-load token codec (300s TTL).
 - :class:`Accordion` — lazy expansion of a persisted snapshot's element tree.
 - :class:`Protocol` — JSONL framing + operation dispatch (engine handlers injected).
+- :class:`TokenBudget` — estimate/cap the token size of accordion responses.
 """
 
 from __future__ import annotations
 
 from cerebellum_cua.gateway.accordion import Accordion
+from cerebellum_cua.gateway.budget import TokenBudget, estimate_tokens
 from cerebellum_cua.gateway.protocol import Protocol
 from cerebellum_cua.gateway.tokens import LazyTokenCodec
 
-__all__ = ["LazyTokenCodec", "Accordion", "Protocol"]
+__all__ = [
+    "LazyTokenCodec",
+    "Accordion",
+    "Protocol",
+    "TokenBudget",
+    "estimate_tokens",
+]

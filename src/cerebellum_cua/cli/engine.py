@@ -24,6 +24,7 @@ from cerebellum_cua.cli.handlers import OperationHandlers
 from cerebellum_cua.config import MatrixConfig
 from cerebellum_cua.errors import SnapshotNotFoundError
 from cerebellum_cua.gateway import Accordion, LazyTokenCodec, Protocol
+from cerebellum_cua.gateway.budget import TokenBudget
 from cerebellum_cua.model import Snapshot
 from cerebellum_cua.storage import get_backend
 from cerebellum_cua.uia import UiaClient
@@ -38,6 +39,7 @@ class CuaEngine:
         secret: str,
         config: MatrixConfig | None = None,
         capture_backend_kind: str = "auto",
+        max_response_tokens: int | None = None,
     ) -> None:
         self.config = config or MatrixConfig()
         #: which capture backend build_matrix uses ("auto"|"uia"|"atspi").
@@ -47,7 +49,10 @@ class CuaEngine:
         self.storage.init_schema()
 
         self.codec = LazyTokenCodec(secret)
-        self.accordion = Accordion(self.storage, self.codec)
+        #: ``None`` leaves the accordion's budget unbounded (default behavior):
+        #: responses are still measured/annotated, never rejected.
+        self.budget = TokenBudget(max_response_tokens)
+        self.accordion = Accordion(self.storage, self.codec, self.budget)
         self.protocol = Protocol()
         self.uia = UiaClient()
 

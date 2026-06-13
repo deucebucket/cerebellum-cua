@@ -66,6 +66,11 @@ class ConcurrentModificationError(MatrixUIError):
     message = "CONCURRENT_MODIFICATION"
 
 
+class TokenBudgetExceededError(MatrixUIError):
+    code = 1009
+    message = "TOKEN_BUDGET_EXCEEDED"
+
+
 # Lookup table for code -> class, used by tests and tooling.
 ERROR_BY_CODE: dict[int, type[MatrixUIError]] = {
     cls.code: cls
@@ -78,5 +83,6 @@ ERROR_BY_CODE: dict[int, type[MatrixUIError]] = {
         UIAAccessDeniedError,
         DegradedBranchError,
         ConcurrentModificationError,
+        TokenBudgetExceededError,
     )
 }
