@@ -1,0 +1,51 @@
+# Changelog
+
+All notable changes to this project are documented here. The format is based on
+[Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
+adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [Unreleased]
+
+## [0.1.0] - 2026-06-13
+
+Initial release. Implements the capture engine, storage, matrix model, gateway,
+and JSONL protocol (wire version 4.2). Live capture has been exercised
+end-to-end on Linux; it is not yet validated against a broad set of real
+applications, and the Windows/UIA path is untested on real Windows.
+
+### Added
+- **Capture seam** (`cerebellum_cua.capture`): OS-neutral `CaptureBackend`
+  interface with a driver that assigns dense matrix row ids; `get_capture_backend`
+  auto-selects by OS; `available_backends()` probe.
+  - `uia` backend (Windows UI Automation) wrapping the UIA layer.
+  - `atspi` backend (Linux AT-SPI) with role/state mapping; degrades gracefully
+    when the a11y bus is unavailable (no process abort).
+- **UIA layer** (`cerebellum_cua.uia`): the `should_include` predicate, FindAll
+  traversal, pattern extraction, and workarounds for the documented UI Automation
+  tree failure modes (stale references, virtualized containers, non-unique ids,
+  recursion limits, missing patterns, browser content, proxy reparenting, access
+  denial, cached-value staleness, event-handler leaks).
+- **Matrix model** (`cerebellum_cua.matrix`): snapshot builder, stable
+  content-addressable element identity, and epoch diffing.
+- **Storage** (`cerebellum_cua.storage`): `StorageBackend` interface with SQLite
+  (default) and PostgreSQL implementations, plus the canonical SQL schema.
+- **Semantics** (`cerebellum_cua.semantics`): heuristic control-type → domain
+  concept mappings and a rule evaluator.
+- **Gateway** (`cerebellum_cua.gateway`): accordion lazy-loading, JWT lazy
+  tokens, and the JSONL protocol/dispatch layer.
+- **Events** (`cerebellum_cua.events`): event-handler manager (remove-before-add)
+  and a debounce coalescer for structure-change bursts.
+- **CLI** (`cerebellum_cua.cli`): the `CuaEngine` composition root, the JSONL
+  stdio REPL, and the `cerebellum-cua` console entry point. Operations:
+  `build_matrix`, `get_element`, `load_children`, `invoke_action`,
+  `get_snapshot_diff`.
+- Unit test suite, `ruff` configuration, and CI.
+
+### Known gaps (tracked as issues)
+- Token-budget accounting on gateway responses is not yet enforced.
+- Live capture is unverified against a wide range of real applications.
+- `invoke_action` re-acquisition of a stored element is backend-incomplete.
+- No MCP server wrapper yet; no macOS AX backend yet.
+
+[Unreleased]: https://github.com/deucebucket/cerebellum-cua/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/deucebucket/cerebellum-cua/releases/tag/v0.1.0
