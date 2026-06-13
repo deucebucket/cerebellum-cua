@@ -312,6 +312,35 @@ Payload fields:
   `class_name`, `automation_id`, `control_type`, `is_interactive`, `is_content`,
   `framework_id`, plus `bounding_rect`, `properties`, and `patterns`.
 
+## Token accounting
+
+The accordion operations annotate their response payloads with an
+`estimated_tokens` field so the token-bounded property of the protocol can be
+observed.
+
+| Field              | Type | Notes                                              |
+|--------------------|------|----------------------------------------------------|
+| `estimated_tokens` | int  | Estimated token size of the response payload.      |
+
+`estimated_tokens` appears on the success payloads of `get_element`,
+`load_children`, and the initial-context response. It is computed by serializing
+the payload to compact JSON (`json.dumps(separators=(",", ":"),
+ensure_ascii=False)`) and dividing the character length by four, rounding up. It
+is a heuristic estimate, not a model-exact token count; a real tokenizer could be
+substituted without changing the field.
+
+The estimate is measured over the payload before the field is added, so the count
+reflects the operation result rather than itself.
+
+### Optional response ceiling
+
+The engine accepts an optional `max_response_tokens` ceiling (default `None` =
+off). When `None`, responses are measured and annotated but never rejected — this
+is the default behavior. When a ceiling is set and an assembled response's
+estimated token count exceeds it, the operation fails with error `1009`
+(`TOKEN_BUDGET_EXCEEDED`); its `details` carry `estimated_tokens` and
+`max_tokens`.
+
 ## Error codes
 
 On a raised domain error the response has `payload: null` and an `error` object.
@@ -326,6 +355,7 @@ On a raised domain error the response has `payload: null` and an `error` object.
 | 1006 | `UIA_ACCESS_DENIED`       | Live capture/invoke cannot run on this host (no backend, missing libs, denied access). |
 | 1007 | `DEGRADED_BRANCH`         | A subtree could not be fully captured.                            |
 | 1008 | `CONCURRENT_MODIFICATION` | The tree changed underneath an operation.                         |
+| 1009 | `TOKEN_BUDGET_EXCEEDED`   | A response's estimated token count exceeds the configured ceiling (only when one is set). |
 | 9999 | `UNKNOWN_OPERATION`       | The operation name is not one of the five (also used for `MALFORMED_REQUEST` on unparseable input). |
 
 Notes:
