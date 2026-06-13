@@ -6,6 +6,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- Token-budget accounting in the gateway: responses carry an `estimated_tokens`
+  field, with an optional per-response ceiling (`CuaEngine(max_response_tokens=…)`)
+  that raises `TokenBudgetExceededError` (code 1009). Default is unbounded. (#1)
+- MCP server (`cerebellum_cua.mcp`, `cerebellum-cua-mcp` script, `[mcp]` extra)
+  exposing the five operations as MCP tools for use inside MCP-based agents. (#2)
+
 ## [0.1.0] - 2026-06-13
 
 Initial release. Implements the capture engine, storage, matrix model, gateway,
@@ -42,10 +49,9 @@ applications, and the Windows/UIA path is untested on real Windows.
 - Unit test suite, `ruff` configuration, and CI.
 
 ### Known gaps (tracked as issues)
-- Token-budget accounting on gateway responses is not yet enforced.
 - Live capture is unverified against a wide range of real applications.
 - `invoke_action` re-acquisition of a stored element is backend-incomplete.
-- No MCP server wrapper yet; no macOS AX backend yet.
+- No macOS AX backend yet; not yet published to PyPI.
 
 [Unreleased]: https://github.com/deucebucket/cerebellum-cua/compare/v0.1.0...HEAD
 [0.1.0]: https://github.com/deucebucket/cerebellum-cua/releases/tag/v0.1.0
