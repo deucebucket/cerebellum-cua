@@ -12,6 +12,10 @@ from typing import Any
 
 import pytest
 
+# The MCP wrapper needs the optional `mcp` extra (pip install -e '.[mcp]').
+# Skip cleanly when it is absent, like the windows/postgres-marked tests.
+pytest.importorskip("mcp")
+
 from cerebellum_cua.matrix import build_snapshot
 from cerebellum_cua.model import Snapshot
 
