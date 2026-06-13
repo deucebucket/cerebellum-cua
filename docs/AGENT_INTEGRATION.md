@@ -110,10 +110,72 @@ On a non-Windows host without a working capture backend, `build_matrix` and
 crashing; the read paths (`get_element`, `load_children`, `get_snapshot_diff`)
 work against any persisted or seeded snapshot.
 
-## (c) MCP server wrapper — planned, not yet available
+## (c) As an MCP server
 
-An MCP (Model Context Protocol) server wrapper is **planned** so that
-`cerebellum-cua` can plug into MCP-based agents the way Playwright's MCP server
-does. It is tracked as an issue and **does not exist yet**. Until it lands, use
-the JSONL stdio interface (a) or the Python library (b) above. This document will
-be updated when the MCP wrapper is available.
+An MCP (Model Context Protocol) server wrapper exposes the same five operations
+as MCP tools, so `cerebellum-cua` can plug into MCP-based agents the way
+Playwright's MCP server does. It is a thin adapter over the `CuaEngine`: each
+tool calls the matching operation handler and returns its response payload.
+
+The MCP runtime is an optional dependency. Install it with the `mcp` extra:
+
+```bash
+pip install -e '.[mcp]'
+```
+
+Run the server over the stdio transport with the same `--db-dsn` / `--secret`
+arguments as the JSONL REPL:
+
+```bash
+python -m cerebellum_cua.mcp --db-dsn ./matrix.db --secret "$JWT_SECRET"
+# or, via the installed console script:
+cerebellum-cua-mcp --db-dsn ./matrix.db --secret "$JWT_SECRET"
+```
+
+Arguments:
+
+- `--db-dsn` (required) — a file path or `sqlite:///...` for the SQLite backend,
+  or `postgresql://user:pass@host:5432/dbname` for PostgreSQL.
+- `--secret` (required) — the HS256 secret used to sign and validate lazy tokens.
+- `--max-response-tokens` (optional) — per-response token ceiling (default: off).
+
+### Registered tools
+
+The server registers five tools, one per operation. Each takes the operation's
+payload fields as typed arguments (see [PROTOCOL.md](PROTOCOL.md)) and returns
+the operation's response payload as a dict. A domain error is returned as a
+structured `{"error": {"code", "message", "details"}}` dict rather than raised.
+
+| Tool                | Arguments                                                                                          |
+|---------------------|----------------------------------------------------------------------------------------------------|
+| `build_matrix`      | `target`, `config`, `capture_backend`                                                              |
+| `get_element`       | `row_id`, `snapshot_id`, `include_relationships`, `include_semantics`, `include_children_stub`     |
+| `load_children`     | `parent_row_id`, `snapshot_id`, `lazy_token`, `max_depth`, `include_properties`, `include_semantics` |
+| `invoke_action`     | `row_id`, `snapshot_id`                                                                            |
+| `get_snapshot_diff` | `from_epoch`, `to_epoch`                                                                           |
+
+`build_matrix` and `invoke_action` require a live capture backend (Windows UIA or
+Linux AT-SPI); on a host without one they return the structured `1006` error,
+matching the JSONL behavior. The read paths (`get_element`, `load_children`,
+`get_snapshot_diff`) work against any persisted or seeded snapshot.
+
+### Registering it with an MCP client
+
+An MCP agent client launches the server as a stdio subprocess. The configuration
+follows the standard MCP server shape — a command, its arguments, and any
+environment:
+
+```json
+{
+  "mcpServers": {
+    "cerebellum-cua": {
+      "command": "cerebellum-cua-mcp",
+      "args": ["--db-dsn", "./matrix.db", "--secret", "${JWT_SECRET}"]
+    }
+  }
+}
+```
+
+Equivalently, use `"command": "python"` with
+`"args": ["-m", "cerebellum_cua.mcp", "--db-dsn", "./matrix.db", "--secret", "${JWT_SECRET}"]`.
+Once registered, the agent sees the five tools above and calls them by name.
