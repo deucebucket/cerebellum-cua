@@ -17,6 +17,8 @@ dependencies = [
 uia = ["uiautomation>=2.0", "comtypes>=1.2"]
 # Postgres production backend.
 postgres = ["psycopg2-binary>=2.9"]
+# MCP server wrapper (exposes the five operations as MCP tools).
+mcp = ["mcp>=1.0"]
 # Dev / test tooling.
 dev = [
     "pytest>=8.0",
@@ -27,6 +29,7 @@ dev = [
 
 [project.scripts]
 cerebellum-cua = "cerebellum_cua.cli.__main__:main"
+cerebellum-cua-mcp = "cerebellum_cua.mcp.__main__:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
