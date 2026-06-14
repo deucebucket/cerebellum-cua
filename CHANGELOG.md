@@ -7,11 +7,37 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
-- Token-budget accounting in the gateway: responses carry an `estimated_tokens`
-  field, with an optional per-response ceiling (`CuaEngine(max_response_tokens=…)`)
-  that raises `TokenBudgetExceededError` (code 1009). Default is unbounded. (#1)
-- MCP server (`cerebellum_cua.mcp`, `cerebellum-cua-mcp` script, `[mcp]` extra)
-  exposing the five operations as MCP tools for use inside MCP-based agents. (#2)
+- Token-budget accounting in the gateway (`estimated_tokens`, optional ceiling,
+  `TokenBudgetExceededError` 1009). (#1)
+- MCP server (`cerebellum_cua.mcp`, `cerebellum-cua-mcp`, `[mcp]` extra). (#2)
+- Action execution: AT-SPI/UIA invoke/set_text/toggle/select/set_value/expand,
+  coordinate click/type/key, and element re-acquisition after a DB round-trip. (#3)
+- Human-visible cursor motion (glide, paced typing) and a user-takeover
+  kill-switch (evdev) that aborts in-progress input. (#11, #12)
+- Optional on-demand `screenshot` operation (hybrid perception). (#19)
+- `vision` capture backend: screenshot → structured elements (OCR + OpenCV),
+  behind the same seam as `uia`/`atspi`. (#21)
+- `read_text` + AT-SPI Text-buffer capture (on-screen text into coordinates). (#26)
+- Drag/scroll input and an opt-in action-verification loop (act → re-capture →
+  diff → `verified`/`effect`). (#25)
+- Skills layer (`run_skill`: resolve → act → verify) — click/type_into/open/etc. (#27)
+- `--mode {desktop,vm,background}` and an in-repo VM rig (`rig/`, `scripts/`). (#13)
+- Authoritative window-state source (`list_windows`; X11 backends). (#23)
+- Compact cipher legend (`read_legend`) + composite/annotated views
+  (`annotate`, `wireframe`). (#22, #28)
+- Token benchmarks (`scripts/benchmark_tokens.py`, `docs/BENCHMARKS.md`). (#8)
+- Adjacent media pipeline (motion/scene → cut-list → xfade). (#29)
+- One-time Linux setup (SELinux fix + scoped sudoers) + `.env` config. (#4)
+- Cross-platform elevation (polkit/sudo/UAC; password from `.env`). (#39)
+- PyPI packaging (schema shipped in the wheel) + release workflow. (#7)
+- Live VNC/noVNC streaming of the VM session. (#34)
+- Tutorial generation (scripted steps + on-screen captions). (#35)
+
+### Changed
+- **UIA backend ported to the real `uiautomation` library API** (was written
+  against raw IUIAutomation COM that does not exist in the library). **Validated
+  on real Windows 11**: captures the live interactive desktop (184 elements,
+  correct control-type mapping). (#5)
 
 ## [0.1.0] - 2026-06-13
 

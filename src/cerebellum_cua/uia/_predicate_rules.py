@@ -4,8 +4,9 @@ Each helper isolates one stage of the spec's exhaustive filtering predicate
 (the design spec, Section 2). They operate on a *duck-typed* UIA control
 wrapper: every attribute access is defensive (try/except), because a live COM
 element raises ``COMError`` / ``AttributeError`` unpredictably. No
-``uiautomation`` import happens here — only the raw integer ControlType / PatternId
-constants the spec references (which equal the real Microsoft UIA constants).
+``uiautomation`` import happens here — pattern support is tested via the
+library's ``Get*Pattern`` accessors (a pattern is supported when its getter
+returns non-``None``).
 
 Returning ``None`` from a stage means "no decision — keep checking"; returning
 ``True``/``False`` is a terminal verdict the caller must honour.
@@ -17,30 +18,19 @@ from typing import Any
 
 from cerebellum_cua.config import MatrixConfig
 from cerebellum_cua.model import ControlType
+from cerebellum_cua.uia.patterns import _get_pattern
 
-# Real Microsoft UIA PatternId constants (the spec's ``auto.PatternId.*``).
-INVOKE_PATTERN = 10000
-SELECTION_PATTERN = 10001
-VALUE_PATTERN = 10002
-RANGE_VALUE_PATTERN = 10003
-SCROLL_PATTERN = 10004
-EXPAND_COLLAPSE_PATTERN = 10005
-GRID_PATTERN = 10006
-TOGGLE_PATTERN = 10015
-TABLE_PATTERN = 10012
-WINDOW_PATTERN = 10009
+# ``uiautomation`` accessor method names for interactivity-implying patterns
+# (spec probe order preserved). Pattern support = the getter returns non-None.
+SCROLL_PATTERN = "GetScrollPattern"
 
-# ValueValue PropertyId (used for the has_value gate).
-VALUE_VALUE_PROPERTY_ID = 30045
-
-# Interactivity-implying patterns the predicate probes (spec order preserved).
-_INTERACTIVE_PATTERNS: tuple[int, ...] = (
-    INVOKE_PATTERN,
-    VALUE_PATTERN,
-    RANGE_VALUE_PATTERN,
-    SELECTION_PATTERN,
-    TOGGLE_PATTERN,
-    EXPAND_COLLAPSE_PATTERN,
+_INTERACTIVE_PATTERNS: tuple[str, ...] = (
+    "GetInvokePattern",
+    "GetValuePattern",
+    "GetRangeValuePattern",
+    "GetSelectionPattern",
+    "GetTogglePattern",
+    "GetExpandCollapsePattern",
     SCROLL_PATTERN,
 )
 
@@ -150,9 +140,9 @@ def compute_interactive(element: Any) -> bool:
     try:
         if element.IsKeyboardFocusable or element.IsEnabled or element.HasKeyboardFocus:
             interactive = True
-        for pattern_id in _INTERACTIVE_PATTERNS:
+        for getter_name in _INTERACTIVE_PATTERNS:
             try:
-                if element.SupportsPattern(pattern_id):
+                if _get_pattern(element, getter_name) is not None:
                     interactive = True
                     break
             except Exception:  # noqa: BLE001 - COMError per-pattern, keep probing
@@ -195,10 +185,15 @@ def check_empty_leaf(
 
 
 def read_has_value(element: Any) -> bool:
-    """True iff the cached ValueValue property is a non-empty value."""
+    """True iff the element exposes a non-empty ValuePattern value (else Name)."""
     try:
-        val = element.GetCachedPropertyValue(VALUE_VALUE_PROPERTY_ID)
-        if val not in (None, ""):
+        pattern = _get_pattern(element, "GetValuePattern")
+        if pattern is not None:
+            val = getattr(pattern, "Value", None)
+            if val not in (None, ""):
+                return True
+        name = getattr(element, "Name", None)
+        if name not in (None, ""):
             return True
     except (AttributeError, Exception):  # noqa: BLE001
         pass

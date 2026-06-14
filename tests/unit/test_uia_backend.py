@@ -11,8 +11,9 @@ guards. These tests confirm:
     correct parent_key wiring, and ``walk_to_rows`` over the fake yields dense
     row ids with correct parent_row_id.
 
-``FakeControl`` mirrors the ``MockControl`` style from ``test_predicate.py`` but
-adds the cached-property accessor + pattern probing the backend reads.
+``FakeControl`` mirrors the real ``uiautomation`` Control surface: bare property
+attributes, ``GetRuntimeId``, ``GetChildren``, and ``Get*Pattern`` accessors that
+return a fake pattern object (or ``None``) — exactly what the backend reads.
 """
 
 from __future__ import annotations
@@ -31,25 +32,64 @@ from cerebellum_cua.capture.uia_backend import UiaCaptureBackend, _element_to_ca
 from cerebellum_cua.config import MatrixConfig
 from cerebellum_cua.model import ControlType
 
-# UIA PropertyId -> attribute map the FakeControl resolves for safe_get_property.
-_PROP_ATTR: dict[int, str] = {
-    30003: "ControlType",
-    30005: "Name",
-    30012: "ClassName",
-    30011: "AutomationId",
-    30001: "RuntimeId",
-    30007: "BoundingRectangle",
-    30017: "FrameworkId",
-    30024: "IsEnabled",
-    30009: "IsKeyboardFocusable",
-    30008: "HasKeyboardFocus",
-    30022: "IsOffscreen",
-    30016: "IsContentElement",
+
+class _Rect:
+    """Real ``uiautomation`` Rect shape: l/t/r/b ints + width/height methods."""
+
+    def __init__(self, r: tuple[int, int, int, int]) -> None:
+        self.left, self.top, self.right, self.bottom = r
+
+    def width(self) -> int:
+        return self.right - self.left
+
+    def height(self) -> int:
+        return self.bottom - self.top
+
+
+class _ValuePattern:
+    """Fake ValuePattern: real ``.Value`` attribute + ``.SetValue``."""
+
+    def __init__(self, owner: FakeControl) -> None:
+        self._owner = owner
+
+    @property
+    def Value(self) -> Any:
+        return self._owner._value
+
+    def SetValue(self, value: Any) -> None:
+        self._owner._value = value
+
+
+class _InvokePattern:
+    """Fake InvokePattern exposing ``.Invoke``."""
+
+    def __init__(self, owner: FakeControl) -> None:
+        self._owner = owner
+
+    def Invoke(self) -> None:
+        self._owner.invoked = True
+
+
+class _TogglePattern:
+    """Fake TogglePattern exposing ``.ToggleState`` + ``.Toggle``."""
+
+    def __init__(self, owner: FakeControl) -> None:
+        self._owner = owner
+        self.ToggleState = 0
+
+    def Toggle(self) -> None:
+        self._owner.invoked = True
+
+
+_PATTERN_FACTORIES = {
+    "GetInvokePattern": _InvokePattern,
+    "GetValuePattern": _ValuePattern,
+    "GetTogglePattern": _TogglePattern,
 }
 
 
 class FakeControl:
-    """Duck-typed UIA control backed by plain attributes (no COM)."""
+    """Duck-typed control mirroring the real ``uiautomation`` Control surface."""
 
     def __init__(
         self,
@@ -63,111 +103,48 @@ class FakeControl:
         is_enabled: bool = True,
         is_keyboard_focusable: bool = True,
         is_content_element: bool = True,
-        supported_patterns: set[int] | None = None,
+        supported_patterns: set[str] | None = None,
         value: Any = None,
         children: list[FakeControl] | None = None,
     ) -> None:
-        self._props: dict[int, Any] = {
-            30003: control_type,
-            30005: name,
-            30012: class_name,
-            30011: automation_id,
-            30001: runtime_id or [1, id(self) % 100000],
-            30007: list(rect),
-            30017: framework_id,
-            30024: is_enabled,
-            30009: is_keyboard_focusable,
-            30008: False,
-            30022: False,
-            30016: is_content_element,
-        }
+        # Bare property attributes, exactly as the real Control exposes them.
+        self.ControlType = control_type
+        self.Name = name
+        self.ClassName = class_name
+        self.AutomationId = automation_id
+        self.FrameworkId = framework_id
+        self.IsEnabled = is_enabled
+        self.IsKeyboardFocusable = is_keyboard_focusable
+        self.HasKeyboardFocus = False
+        self.IsOffscreen = False
+        self.IsContentElement = is_content_element
+        self.NativeWindowHandle = 0
+        self.ProcessId = 0
+        self.BoundingRectangle = _Rect(rect)
+        self._runtime_id = runtime_id or [1, id(self) % 100000]
         self._patterns = supported_patterns or set()
         self._value = value
         self._children = children or []
         self.invoked = False
-        # Predicate reads these as bare attributes.
-        self.ControlType = control_type
-        self._rect = rect
 
-    # --- predicate.py duck-typed surface -------------------------------------
-    class _Rect:
-        def __init__(self, r: tuple[int, int, int, int]) -> None:
-            self._r = r
-
-        @property
-        def left(self) -> int:
-            return self._r[0]
-
-        @property
-        def top(self) -> int:
-            return self._r[1]
-
-        def width(self) -> int:
-            return self._r[2] - self._r[0]
-
-        def height(self) -> int:
-            return self._r[3] - self._r[1]
-
-    @property
-    def BoundingRectangle(self) -> _Rect:
-        return FakeControl._Rect(self._rect)
-
-    @property
-    def Name(self) -> str:
-        return self._props[30005]
-
-    @property
-    def ClassName(self) -> str:
-        return self._props[30012]
-
-    @property
-    def AutomationId(self) -> str:
-        return self._props[30011]
-
-    @property
-    def FrameworkId(self) -> str:
-        return self._props[30017]
-
-    @property
-    def IsOffscreen(self) -> bool:
-        return self._props[30022]
-
-    @property
-    def IsContentElement(self) -> bool:
-        return self._props[30016]
-
-    # --- patterns / property getters the backend uses ------------------------
-    def SupportsPattern(self, pid: int) -> bool:
-        return pid in self._patterns
-
-    def GetPattern(self, pid: int) -> Any:
-        if pid not in self._patterns:
-            return None
-        return _FakePattern(self)
-
-    def GetCachedPropertyValue(self, prop_id: int) -> Any:
-        if prop_id == 30045:  # ValueValue
-            return self._value
-        return self._props.get(prop_id)
+    def GetRuntimeId(self) -> list[int]:
+        return list(self._runtime_id)
 
     def GetChildren(self) -> list[FakeControl]:
         return list(self._children)
 
+    def __getattr__(self, item: str) -> Any:
+        # Synthesize Get*Pattern accessors: a supported pattern returns its fake
+        # object, an unsupported one returns None (mirrors the real library).
+        if item.startswith("Get") and item.endswith("Pattern"):
+            def _getter(name: str = item) -> Any:
+                if name not in self._patterns:
+                    return None
+                factory = _PATTERN_FACTORIES.get(name)
+                return factory(self) if factory is not None else object()
 
-class _FakePattern:
-    """Stand-in pattern object exposing Invoke / SetValue / Toggle."""
-
-    def __init__(self, owner: FakeControl) -> None:
-        self._owner = owner
-
-    def Invoke(self) -> None:
-        self._owner.invoked = True
-
-    def SetValue(self, value: Any) -> None:
-        self._owner._value = value
-
-    def Toggle(self) -> None:
-        self._owner.invoked = True
+            return _getter
+        raise AttributeError(item)
 
 
 class FakeUiaClient:
@@ -186,7 +163,8 @@ class FakeUiaClient:
         return self._root
 
 
-_INVOKE_PID = 10000  # InvokePattern PatternId (matches uia._predicate_rules).
+# InvokePattern accessor name (matches uia.patterns.PATTERN_MAP["invoke"]).
+_INVOKE_PID = "GetInvokePattern"
 
 
 def _sample_tree() -> FakeControl:
