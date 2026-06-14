@@ -113,4 +113,62 @@ the on-screen result to `out/demo.mp4` plus `out/before.png` / `out/after.png`.
 
 To watch a `vm`-mode session, attach a VNC server to the container's virtual
 display (the Xvfb display, `:99` by default) and connect a VNC client to it. The
-`background` mode is intended to run without any viewer.
+`background` mode is intended to run without any viewer. The
+[streaming section below](#watch-it-live-streaming) wires this up for you.
+
+## Watch it live (streaming)
+
+The recording flow above captures the session to a video file and exits.
+`scripts/stream-vm.sh` is the live counterpart: it brings up the same isolated
+desktop but, instead of recording, **serves the virtual display so you can watch
+the agent drive it in real time** while it runs.
+
+It runs `rig/session.sh` with `STREAM=1`, which (after Xvfb, openbox, the session
+D-Bus, the AT-SPI bus, and the app are up) starts:
+
+- `x11vnc` serving the Xvfb display over VNC, and
+- `websockify`/noVNC exposing that VNC stream as a web client,
+
+then keeps the container running so the agent can be driven while watched (rather
+than recording for a fixed number of seconds and exiting).
+
+```bash
+# build (first run) + stream the default app (gedit)
+scripts/stream-vm.sh
+
+# override the app or the ports
+APP=gedit NOVNC_PORT=6080 VNC_PORT=5900 scripts/stream-vm.sh
+
+# force a rebuild of the image
+REBUILD=1 scripts/stream-vm.sh
+```
+
+Once it prints `live stream up`, open one of these in a side window:
+
+- **Browser (noVNC):** <http://127.0.0.1:6080/vnc.html>
+- **VNC client:** connect to `127.0.0.1:5900`
+
+Streaming environment overrides:
+
+| Variable     | Default       | Meaning                                  |
+|--------------|---------------|------------------------------------------|
+| `APP`        | `gedit`       | app to launch in the virtual session     |
+| `SCREEN_SIZE`| `1280x800x24` | Xvfb geometry (`WxHxDepth`)              |
+| `VNC_PORT`   | `5900`        | x11vnc RFB port                          |
+| `NOVNC_PORT` | `6080`        | noVNC / websockify web port             |
+| `IMAGE`      | `cerebellum-cua-rig` | image tag                         |
+
+What this is, honestly:
+
+- It **streams the VM to a viewer you open yourself** (a browser tab or VNC
+  client). It does **not** embed the session into any particular chat or agent
+  UI — embedding is the client's capability, not something this rig provides.
+- The ports are **published on `127.0.0.1` only**, so the stream is reachable
+  from this host alone, never the network. (`x11vnc` runs with `-nopw`, which is
+  acceptable precisely because exposure is localhost-bound.)
+- It is **ephemeral**: nothing is recorded or persisted, and the stream ends when
+  the container stops (`Ctrl-C` or `podman stop`).
+- This is the live version of the [record flow](#record-a-demo); for a
+  fixed-length video file instead of a live view, use `scripts/record-demo.sh` /
+  `scripts/run-vm.sh`. For an unattended run with no viewer at all, use the
+  `background` mode.
