@@ -59,3 +59,29 @@ class LiveAdapter:
 
     def get_parent(self) -> Any:
         return self._acc.get_parent()
+
+    def get_text(self, start: int, end: int) -> str:
+        """Read the Text-interface buffer via ``Atspi.Text.get_text``.
+
+        Imported lazily so this module stays importable without ``gi``. Returns
+        an empty string if the bindings or the interface are unavailable.
+        """
+        try:
+            import gi  # noqa: PLC0415
+
+            gi.require_version("Atspi", "2.0")
+            from gi.repository import Atspi  # noqa: PLC0415
+        except (ImportError, ValueError):
+            return ""
+        return Atspi.Text.get_text(self._acc, start, end) or ""
+
+    def get_caret_offset(self) -> int:
+        """Read the Text-interface caret offset via ``Atspi.Text``."""
+        try:
+            import gi  # noqa: PLC0415
+
+            gi.require_version("Atspi", "2.0")
+            from gi.repository import Atspi  # noqa: PLC0415
+        except (ImportError, ValueError):
+            return -1
+        return int(Atspi.Text.get_caret_offset(self._acc))

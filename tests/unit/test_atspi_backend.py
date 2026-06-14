@@ -42,6 +42,8 @@ class FakeAtspi:
         interfaces: set[str] | None = None,
         extents: _Extents | None = None,
         children: list[FakeAtspi] | None = None,
+        text: str | None = None,
+        caret: int | None = None,
     ) -> None:
         self._role = role
         self._name = name
@@ -50,6 +52,8 @@ class FakeAtspi:
         self._interfaces = interfaces or set()
         self._extents = extents or _Extents(0, 0, 100, 30)
         self._children = children or []
+        self._text = text
+        self._caret = caret
         self._parent: FakeAtspi | None = None
         for i, c in enumerate(self._children):
             c._parent = self
@@ -81,6 +85,13 @@ class FakeAtspi:
 
     def get_parent(self) -> FakeAtspi | None:
         return self._parent
+
+    # --- Text interface surface read by _convert.read_text_content ---
+    def get_text(self, start: int, end: int) -> str:
+        return self._text or ""
+
+    def get_caret_offset(self) -> int:
+        return self._caret if self._caret is not None else 0
 
     def get_child_count(self) -> int:
         return len(self._children)
@@ -205,6 +216,44 @@ def test_convert_runtime_id_from_index_chain() -> None:
 def test_convert_is_content_for_text() -> None:
     assert convert(FakeAtspi(role="label", name="hi")).is_content is True
     assert convert(FakeAtspi(role="push button", name="ok")).is_content is False
+
+
+# --------------------------------------------------------------------------- #
+# _convert text_content (Text interface)
+# --------------------------------------------------------------------------- #
+def test_convert_captures_text_content_when_text_interface() -> None:
+    acc = FakeAtspi(
+        role="text",
+        interfaces={"Text", "EditableText"},
+        text="line one\nline two",
+        caret=4,
+    )
+    el = convert(acc)
+    assert el.properties["text_content"] == "line one\nline two"
+    assert el.properties["caret_offset"] == 4
+    assert "text_truncated" not in el.properties
+
+
+def test_convert_text_content_respects_cap_and_truncation_flag() -> None:
+    acc = FakeAtspi(role="text", interfaces={"Text"}, text="x" * 50)
+    el = convert(acc, text_max_chars=10)
+    assert el.properties["text_content"] == "x" * 10
+    assert el.properties["text_truncated"] is True
+
+
+def test_convert_no_text_content_without_text_interface() -> None:
+    # FakeAtspi always exposes get_text, but with no Text interface the buffer
+    # must never be read into properties.
+    acc = FakeAtspi(role="push button", name="OK", interfaces={"Action"}, text="hidden")
+    el = convert(acc)
+    assert "text_content" not in el.properties
+    assert "caret_offset" not in el.properties
+
+
+def test_convert_empty_text_buffer_sets_no_text_content() -> None:
+    acc = FakeAtspi(role="text", interfaces={"Text"}, text="")
+    el = convert(acc)
+    assert "text_content" not in el.properties
 
 
 # --------------------------------------------------------------------------- #

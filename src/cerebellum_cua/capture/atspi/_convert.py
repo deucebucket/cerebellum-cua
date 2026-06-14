@@ -16,6 +16,10 @@ from __future__ import annotations
 
 from typing import Any
 
+from cerebellum_cua.capture.atspi._text import (
+    DEFAULT_TEXT_MAX_CHARS,
+    apply_text_content,
+)
 from cerebellum_cua.capture.atspi.roles import control_type_for, interactive_type_for
 from cerebellum_cua.capture.base import CapturedElement
 from cerebellum_cua.model import BoundingRect, ControlType
@@ -232,8 +236,16 @@ def _derive_properties(
     }
 
 
-def convert(accessible: Any) -> CapturedElement:
-    """Convert one duck-typed AT-SPI accessible into a :class:`CapturedElement`."""
+def convert(
+    accessible: Any, text_max_chars: int = DEFAULT_TEXT_MAX_CHARS
+) -> CapturedElement:
+    """Convert one duck-typed AT-SPI accessible into a :class:`CapturedElement`.
+
+    When the accessible supports the ``Text`` interface its full text buffer is
+    captured into ``properties["text_content"]`` (capped at ``text_max_chars``,
+    with ``properties["text_truncated"]`` set on overflow) plus the caret offset
+    in ``properties["caret_offset"]`` when available.
+    """
     role = _role_name(accessible)
     control_type = control_type_for(role)
     attrs = read_attributes(accessible)
@@ -247,6 +259,7 @@ def convert(accessible: Any) -> CapturedElement:
 
     rect = read_rect(accessible)
     properties = _derive_properties(states, attrs)
+    apply_text_content(properties, accessible, interfaces, text_max_chars)
     patterns = _derive_patterns(states, interfaces)
 
     interactive_kind = interactive_type_for(role, interfaces)

@@ -100,6 +100,70 @@ def test_get_element_unknown_row_returns_typed_error(engine: CuaEngine) -> None:
     assert resp["error"]["code"] == 1002  # ELEMENT_NOT_FOUND
 
 
+# --- read_text aggregation ----------------------------------------------
+def _screen_with_text(epoch: int) -> Snapshot:
+    """root window(0) -> [terminal text(1, text_content), label(2, name only)]."""
+    walked = [
+        (_elem("Konsole", 50032), 0, None),
+        (
+            _elem(
+                "buffer",
+                50020,
+                properties={"text_content": "$ ls\nfile.txt"},
+                bounding_rect={"left": 5, "top": 30, "width": 600, "height": 400},
+            ),
+            1,
+            0,
+        ),
+        (
+            _elem(
+                "Status: ready",
+                50020,
+                bounding_rect={"left": 5, "top": 440, "width": 200, "height": 18},
+            ),
+            1,
+            0,
+        ),
+    ]
+    return build_snapshot(walked, epoch=epoch)
+
+
+def test_read_text_returns_texts_with_bboxes(engine: CuaEngine) -> None:
+    sid = engine.register_seed(_screen_with_text(epoch=1))["snapshot_id"]
+    resp = _call(engine, "read_text", {"snapshot_id": sid})
+    assert resp["error"] is None
+    payload = resp["payload"]
+    by_row = {t["row_id"]: t for t in payload["texts"]}
+    # row 1 prefers text_content over its name "buffer".
+    assert by_row[1]["text"] == "$ ls\nfile.txt"
+    assert by_row[1]["bbox"] == [5, 30, 600, 400]
+    # row 2 has no text_content, so its name is used.
+    assert by_row[2]["text"] == "Status: ready"
+    assert by_row[2]["bbox"] == [5, 440, 200, 18]
+    # the root window has a name too, so count includes it.
+    assert payload["count"] == 3
+
+
+def test_read_text_defaults_to_latest_snapshot(engine: CuaEngine) -> None:
+    engine.register_seed(_screen_with_text(epoch=1))
+    engine.register_seed(_screen_with_text(epoch=2))
+    resp = _call(engine, "read_text", {})
+    assert resp["error"] is None
+    # latest snapshot still has its three texts.
+    assert resp["payload"]["count"] == 3
+
+
+def test_read_text_empty_when_nothing_has_text(engine: CuaEngine) -> None:
+    walked = [
+        (_elem("", 50026, bounding_rect={"left": 0, "top": 0, "width": 10, "height": 10}), 0, None),
+    ]
+    sid = engine.register_seed(build_snapshot(walked, epoch=1))["snapshot_id"]
+    resp = _call(engine, "read_text", {"snapshot_id": sid})
+    assert resp["error"] is None
+    assert resp["payload"]["texts"] == []
+    assert resp["payload"]["count"] == 0
+
+
 # --- diff across two seeded epochs --------------------------------------
 def test_snapshot_diff_across_epochs(engine: CuaEngine) -> None:
     engine.register_seed(_window_with_button(epoch=1, button_name="Save"))
@@ -329,6 +393,7 @@ def test_handlers_dict_exposes_operations(engine: CuaEngine) -> None:
         "invoke_action",
         "get_snapshot_diff",
         "screenshot",
+        "read_text",
     }
 
 

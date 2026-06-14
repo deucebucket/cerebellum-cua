@@ -32,6 +32,10 @@ class MatrixConfig:
     max_elements: int = 12000
     browser_max_depth: int = 9
 
+    # Max chars captured from a Text-interface element's buffer into
+    # ``properties["text_content"]``; overflow sets ``text_truncated``.
+    text_content_max_chars: int = 4000
+
     # Inclusion toggles (default = prune for a lean matrix).
     interactive_only: bool = False
     include_invisible: bool = False

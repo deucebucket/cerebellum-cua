@@ -176,7 +176,7 @@ class AtspiCaptureBackend(CaptureBackend):
         if accessible is None or depth > config.max_depth:
             return
         adapter = LiveAdapter(accessible, coord_screen)
-        element = convert(adapter)
+        element = convert(adapter, text_max_chars=config.text_content_max_chars)
         # native_ref must be the *raw* live object so id() keys match children.
         element.native_ref = accessible
 
