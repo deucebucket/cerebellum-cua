@@ -39,10 +39,15 @@ class CuaEngine:
         config: MatrixConfig | None = None,
         capture_backend_kind: str = "auto",
         max_response_tokens: int | None = None,
+        user_takeover_guard: bool = True,
     ) -> None:
         self.config = config or MatrixConfig()
         #: which capture backend build_matrix uses ("auto"|"uia"|"atspi").
         self.capture_backend_kind = capture_backend_kind
+        #: when True, coordinate/raw-input actions arm an AbortWatcher so real
+        #: user activity (key/mouse/panic key) cancels in-progress synthetic
+        #: input. Degrades to a no-op where evdev/`/dev/input` is unavailable.
+        self.user_takeover_guard = user_takeover_guard
         self.storage = get_backend(db_dsn)
         self.storage.connect()
         self.storage.init_schema()

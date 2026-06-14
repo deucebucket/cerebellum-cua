@@ -44,33 +44,57 @@ def perform_action(engine: CuaEngine, payload: dict[str, Any]) -> dict[str, Any]
     """Execute one ``invoke_action`` request and return its result payload."""
     action = str(payload.get("action") or "invoke")
     if action in _COORDINATE_ACTIONS:
-        return _coordinate_action(action, payload)
+        guard = bool(getattr(engine, "user_takeover_guard", True))
+        return _coordinate_action(action, payload, guard)
     return _element_action(engine, action, payload)
 
 
-def _coordinate_action(action: str, payload: dict[str, Any]) -> dict[str, Any]:
-    """Synthesize coordinate/raw input (no element, no snapshot needed)."""
+def _coordinate_action(
+    action: str, payload: dict[str, Any], guard: bool
+) -> dict[str, Any]:
+    """Synthesize coordinate/raw input (no element, no snapshot needed).
+
+    When ``guard`` is set, an :class:`~cerebellum_cua.capture.abort.AbortWatcher`
+    is armed so genuine user input (key/mouse/panic key) cancels the in-progress
+    synthetic motion. A takeover returns ``{"success": False, "aborted": True}``
+    rather than raising. The watcher degrades to a no-op where evdev or
+    ``/dev/input`` is unavailable, so this never blocks or crashes.
+    """
+    from cerebellum_cua.capture.abort import (  # noqa: PLC0415
+        AbortedByUser,
+        AbortWatcher,
+    )
     from cerebellum_cua.capture.input import (  # noqa: PLC0415
         SyntheticInput,
         SyntheticInputError,
     )
 
     si = SyntheticInput()
+    watcher = AbortWatcher() if guard else None
+    abort = watcher.event if watcher is not None else None
+    if watcher is not None:
+        watcher.start()
     try:
         if action == "click_point":
             ok = si.click(
                 int(payload["x"]), int(payload["y"]),
                 button=str(payload.get("button", "left")),
                 double=bool(payload.get("double", False)),
+                abort=abort,
             )
         elif action == "type":
-            ok = si.type_text(str(payload.get("value", "")))
+            ok = si.type_text(str(payload.get("value", "")), abort=abort)
         else:  # "key"
             ok = si.key(str(payload["value"]))
+    except AbortedByUser:
+        return {"success": False, "action": action, "aborted": True}
     except SyntheticInputError as exc:
         raise UIAAccessDeniedError(
             reason="synthetic_input_unavailable", detail=str(exc)
         ) from exc
+    finally:
+        if watcher is not None:
+            watcher.stop()
     return {"success": bool(ok), "action": action}
 
 

@@ -110,6 +110,59 @@ On a non-Windows host without a working capture backend, `build_matrix` and
 crashing; the read paths (`get_element`, `load_children`, `get_snapshot_diff`)
 work against any persisted or seeded snapshot.
 
+### Human-visible motion and the user-takeover kill-switch
+
+Coordinate / raw-input actions (`click_point`, `type`, `key`) drive the pointer
+in a human-observable way and can be cancelled the instant a real person takes
+over.
+
+**Motion profile.** `SyntheticInput` glides the cursor to the target along an
+ease-in-out path and decomposes a click into move → settle → press → hold →
+release; typing is paced per character. It is tunable:
+
+```python
+from cerebellum_cua.capture.input import SyntheticInput
+
+SyntheticInput(
+    speed="human",        # "human" (animated, default) | "instant" (one jump, no sleeps)
+    move_duration=0.5,    # seconds a glide spans
+    steps=30,             # interpolation increments per glide
+    click_pause=0.08,     # settle-before-press / press-hold duration
+    key_delay=0.012,      # per-character typing delay (seconds)
+)
+```
+
+The `"instant"` profile bypasses all interpolation and sleeps — use it for
+headless runs and fast tests. Coordinate input still requires XTEST (X11) or
+`ydotool` (Wayland).
+
+**Kill-switch.** Pass `user_takeover_guard` to the engine (default `True`):
+
+```python
+from cerebellum_cua.cli import CuaEngine
+
+with CuaEngine(db_dsn="./matrix.db", secret="s", user_takeover_guard=True) as engine:
+    ...
+```
+
+When enabled, each coordinate action arms an `AbortWatcher` that reads Linux
+`evdev` devices in a background thread and trips the moment it sees genuine user
+input (any keypress/mouse move) or the panic key (`Space`/`Esc`). The in-progress
+motion stops and the action returns `{"success": false, "action": ..., "aborted":
+true}`. The watcher ignores our own synthetic device (matched by name —
+`ydotool`/`uinput`) so automation never cancels itself.
+
+The kill-switch is opt-in via this flag and **safe by default everywhere**: the
+`evdev` package is an optional dependency and `/dev/input` access is not required.
+When either is missing the watcher degrades to a no-op (`available is False`) that
+never blocks and never crashes — existing behavior is unchanged. To enable real
+detection on Linux:
+
+```bash
+pip install -e '.[input]'      # installs evdev
+# and ensure the running user can read /dev/input (e.g. is in the `input` group)
+```
+
 ## (c) As an MCP server
 
 An MCP (Model Context Protocol) server wrapper exposes the same five operations

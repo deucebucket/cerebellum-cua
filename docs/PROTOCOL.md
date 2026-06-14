@@ -254,6 +254,30 @@ input. They are best-effort and platform-dependent (X11 XTEST via `Atspi`, or th
 - `{"action":"type","value":"<text>"}`
 - `{"action":"key","value":"ctrl+s"}`
 
+By default coordinate input is **human-visible**: the cursor glides to the target
+along an ease-in-out path and clicks decompose into move/settle/press/hold/release;
+typing is paced per character. The motion profile is configured on the engine /
+`SyntheticInput`, not per-request (see AGENT_INTEGRATION.md). A `"speed":"instant"`
+profile collapses each action to a single jump with no sleeps for headless/fast
+paths.
+
+**User-takeover kill-switch.** When the engine is constructed with
+`user_takeover_guard=True` (the default), coordinate/raw-input actions arm a
+background watcher that monitors real Linux input devices (`evdev`). If a genuine
+keypress, mouse move, or the panic key (`Space`/`Esc`) is detected mid-action, the
+synthetic motion stops immediately and the call returns a clean result instead of
+fighting the user:
+
+```json
+{"success": false, "action": "click_point", "aborted": true}
+```
+
+The watcher excludes our own synthetic device (`ydotool`/`uinput`) so automation
+never aborts itself, and degrades to a no-op (never blocking, never crashing) when
+`evdev` is not installed or `/dev/input` is not readable. The `evdev` dependency is
+optional (`pip install -e '.[input]'`) and the watching user needs read access to
+`/dev/input` (membership in the `input` group).
+
 Element-action request:
 
 ```json
