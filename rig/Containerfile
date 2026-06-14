@@ -1,0 +1,39 @@
+# Isolated virtual-desktop rig for cerebellum-cua.
+#
+# Builds a self-contained Ubuntu image with a headless X11 session (Xvfb),
+# a window manager (openbox), a session D-Bus, and the AT-SPI accessibility
+# bus, plus the tools the capture/record harness needs:
+#
+#   - at-spi2-core / python3-gi / gir1.2-atspi-2.0  -> AT-SPI capture backend
+#   - ffmpeg                                         -> screen recording + screenshots
+#   - xdotool / x11-utils                            -> X helpers (xdpyinfo readiness probe)
+#   - tesseract-ocr / python3-opencv                 -> optional vision backend
+#   - gedit                                          -> a GTK app with good AT-SPI coverage
+#
+# The repo is mounted read-only at /work at run time (see scripts/run-vm.sh), so
+# PYTHONPATH points at /work/src rather than installing the package into the image.
+FROM ubuntu:24.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      xvfb openbox dbus-x11 at-spi2-core libglib2.0-bin \
+      python3 python3-gi gir1.2-atspi-2.0 python3-pip python3-evdev \
+      ffmpeg xdotool x11-utils \
+      gedit tesseract-ocr python3-opencv \
+    && pip3 install --break-system-packages PyJWT pytesseract \
+    && rm -rf /var/lib/apt/lists/*
+
+# Accessibility + display defaults. The session script may override DISPLAY.
+ENV DISPLAY=:99 \
+    QT_ACCESSIBILITY=1 \
+    GTK_MODULES=gail:atk-bridge \
+    NO_AT_BRIDGE=0 \
+    PYTHONPATH=/work/src
+
+# The session harness is copied in so the image is runnable on its own; it is
+# also mounted from the repo at run time, so edits do not require a rebuild.
+COPY session.sh /rig/session.sh
+RUN chmod +x /rig/session.sh
+
+CMD ["/rig/session.sh"]
