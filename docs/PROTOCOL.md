@@ -50,9 +50,10 @@ The error object is:
 ## Operations
 
 There are five core operations: `build_matrix`, `get_element`, `load_children`,
-`invoke_action`, `get_snapshot_diff`, plus two extensions: `screenshot` (opt-in
-on-demand visual capture) and `read_text` (aggregate on-screen text + coords).
-An unknown operation returns code `9999`.
+`invoke_action`, `get_snapshot_diff`, plus three extensions: `screenshot` (opt-in
+on-demand visual capture), `read_text` (aggregate on-screen text + coords), and
+`run_skill` (resolve a target by query, then act on it). An unknown operation
+returns code `9999`.
 
 ### build_matrix
 
@@ -549,6 +550,83 @@ Response:
 When no snapshot has been persisted yet, the call returns error `1001`
 (`SNAPSHOT_NOT_FOUND`). When the snapshot exists but nothing has text, `texts` is
 empty and `count` is `0`.
+
+### run_skill
+
+Runs a named high-level skill: it resolves a target element from a query, runs an
+action on it through `invoke_action` (which re-acquires the live element and
+applies the optional verify step), and returns a structured result. This is the
+one-call form of `build_matrix` → resolve → `invoke_action`.
+
+Payload keys:
+
+- `skill` — the skill name (`click`, `type_into`, `open`, `focus`, `read`).
+- `args` — the skill arguments. The query fields below are AND-combined; unknown
+  keys are ignored. `type_into` additionally requires a top-level `value` inside
+  `args`.
+- `snapshot_id` — optional; resolve against this snapshot (default: latest).
+- `capture` — optional; when `true` (or when nothing is persisted yet) a fresh
+  `build_matrix` runs before resolving, so skills work from a cold start.
+
+Query fields inside `args` (all optional):
+
+| Field            | Type        | Matches                                          |
+|------------------|-------------|--------------------------------------------------|
+| `name`           | string      | exact element name, case-insensitive.            |
+| `name_contains`  | string      | substring of the name, case-insensitive.         |
+| `text_contains`  | string      | substring of name or `properties.text_content`.  |
+| `role`           | int\|string | control-type int (`50000`) or name (`"BUTTON"`). |
+| `control_type`   | int\|string | alias of `role`.                                 |
+| `semantic`       | string      | a domain concept on the element.                 |
+| `nth`            | int         | pick the nth match (default `0`), stable order.  |
+
+Request:
+
+```json
+{"msg_id":"12","operation":"run_skill","payload":{"skill":"click","args":{"name":"Save"}}}
+```
+
+Response (the skill result, carrying the underlying `invoke_action` keys):
+
+```json
+{
+  "msg_id": "12",
+  "type": "response",
+  "operation": "run_skill",
+  "payload": {
+    "skill": "click",
+    "resolved_row_id": 7,
+    "success": true,
+    "action": "click",
+    "affected_rows": [7]
+  },
+  "error": null
+}
+```
+
+A `type_into` call sets a field's text:
+
+```json
+{"msg_id":"13","operation":"run_skill","payload":{"skill":"type_into","args":{"value":"hello","role":"EDIT"}}}
+```
+
+When the query matches no element the response is a structured failure (not an
+error envelope) and no action is performed:
+
+```json
+{
+  "msg_id": "14",
+  "type": "response",
+  "operation": "run_skill",
+  "payload": {"skill": "click", "resolved_row_id": null, "success": false, "reason": "not_found", "query": {"name": "Nonexistent"}},
+  "error": null
+}
+```
+
+An unknown skill name returns `{"success": false, "reason": "unknown_skill"}` in
+the payload. When verification is enabled (engine `verify_actions`, or `"verify":
+true` inside `args`) the result also carries `verified` / `effect` /
+`observed_change`, exactly as `invoke_action` does.
 
 ## Token accounting
 

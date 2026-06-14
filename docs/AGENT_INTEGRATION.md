@@ -125,6 +125,68 @@ Verification reuses the normal capture path and the `get_snapshot_diff` logic, s
 it costs roughly one extra `build_matrix`. Leave it off (the default) for actions
 whose effect you do not need to confirm, or when minimizing capture overhead.
 
+## Skills: resolve a target by description, then act
+
+The low-level loop is `build_matrix` → inspect → `invoke_action` by `row_id`. The
+`run_skill` operation collapses that into one call: a **skill** resolves a target
+element from a small query, runs an action on it, and (when verification is on)
+reports whether it landed. The agent names *what* it wants — `click` the `Save`
+button — instead of bookkeeping row ids.
+
+A skill resolves against the latest snapshot. Pass `"capture": true` to build a
+fresh tree first, which is what you want from a cold start (e.g. opening an app):
+
+```jsonl
+→ {"msg_id":"6","operation":"run_skill","payload":{"skill":"click","args":{"name":"Save"}}}
+← {"msg_id":"6","type":"response","operation":"run_skill","payload":{"skill":"click","resolved_row_id":7,"success":true,"action":"click","affected_rows":[7]},"error":null}
+
+→ {"msg_id":"7","operation":"run_skill","payload":{"skill":"type_into","args":{"value":"hello","role":"EDIT"}}}
+← {"msg_id":"7","type":"response","operation":"run_skill","payload":{"skill":"type_into","resolved_row_id":3,"success":true,"action":"set_text"},"error":null}
+
+→ {"msg_id":"8","operation":"run_skill","payload":{"skill":"open","args":{"name":"My Computer"},"capture":true}}
+← {"msg_id":"8","type":"response","operation":"run_skill","payload":{"skill":"open","resolved_row_id":2,"success":true,"action":"click"},"error":null}
+```
+
+### Built-in skills
+
+| Skill       | Resolves              | Acts                                              |
+|-------------|-----------------------|--------------------------------------------------|
+| `click`     | one element by query  | the element's primary action ("click"/invoke).   |
+| `type_into` | a field by query      | `set_text` to `value` (falls back to click+type).|
+| `open`      | a target by name      | invoke it (launchers, menu items, desktop icons).|
+| `focus`     | one element by query  | focus it (via a click).                          |
+| `read`      | one element by query  | none — returns the element's `text`.             |
+
+`type_into` takes `value` as a top-level arg; the rest of `args` is the query.
+
+### Query fields (all optional, AND-combined)
+
+- `name` — exact element name, case-insensitive.
+- `name_contains` — substring of the name, case-insensitive.
+- `text_contains` — substring of the name or `properties.text_content`.
+- `role` / `control_type` — a raw UIA control-type int (`50000`) or a control-type
+  name (`"BUTTON"`, `"EDIT"`, `"MENU_ITEM"`).
+- `semantic` — a domain concept on the element (e.g. `action_button`, `text_input`).
+- `nth` — pick the nth match (default `0`) in stable top-to-bottom, left-to-right
+  order.
+
+When several elements match, the resolver sorts them by position so a given query
+resolves to the same element for an unchanged snapshot; use `nth` to pick another.
+
+### Result shape and the not-found path
+
+Every skill returns `{skill, resolved_row_id, success, …}`. A skill that acts
+also carries the underlying `invoke_action` keys (`action`, `affected_rows`, and
+`verified`/`effect`/`observed_change` when verification is enabled). If the query
+matches nothing the skill returns `{skill, success:false, reason:"not_found",
+query}` and performs no action — it never raises. An unknown skill name returns
+`{skill, success:false, reason:"unknown_skill"}`.
+
+Skills compose the existing layers; they do not reimplement actions or
+verification. Enabling verification (engine `verify_actions=True` or threading
+`"verify": true` through `args`) annotates the skill result the same way it
+annotates `invoke_action`.
+
 ## (a) As a subprocess over JSONL stdio
 
 Launch the engine as a child process and exchange JSONL lines with it. This works

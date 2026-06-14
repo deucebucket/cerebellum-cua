@@ -394,6 +394,7 @@ def test_handlers_dict_exposes_operations(engine: CuaEngine) -> None:
         "get_snapshot_diff",
         "screenshot",
         "read_text",
+        "run_skill",
     }
 
 
