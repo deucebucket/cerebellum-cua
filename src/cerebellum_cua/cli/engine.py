@@ -41,10 +41,20 @@ class CuaEngine:
         max_response_tokens: int | None = None,
         user_takeover_guard: bool = True,
         visible_cursor: bool = False,
+        verify_actions: bool = False,
     ) -> None:
         self.config = config or MatrixConfig()
         #: which capture backend build_matrix uses ("auto"|"uia"|"atspi").
         self.capture_backend_kind = capture_backend_kind
+        #: when True, every invoke_action re-captures the tree afterward and
+        #: reports whether the UI observably changed (per-call ``verify`` in the
+        #: payload overrides this). Default False so existing behavior/tests are
+        #: unchanged — verification is strictly additive and opt-in.
+        self.verify_actions = verify_actions
+        #: re-capture context recorded by the last successful build_matrix, so a
+        #: verification pass can rebuild a fresh snapshot of the same target with
+        #: the same backend/config. None until the first live capture.
+        self.last_capture: dict[str, Any] | None = None
         #: when True, coordinate/raw-input actions arm an AbortWatcher so real
         #: user activity (key/mouse/panic key) cancels in-progress synthetic
         #: input. Degrades to a no-op where evdev/`/dev/input` is unavailable.
@@ -103,6 +113,12 @@ class CuaEngine:
             self.current_epoch = snapshot.epoch
         snapshot_id = self.persist(snapshot)
         return self._handlers.register_snapshot(snapshot, snapshot_id)
+
+    def snapshots_latest(self) -> Snapshot | None:
+        """Return the most recent in-memory snapshot (highest epoch), or None."""
+        if not self._snapshots:
+            return None
+        return self._snapshots[max(self._snapshots)]
 
     def snapshot_for_epoch(self, epoch: int) -> Snapshot:
         """Return the in-memory snapshot for ``epoch`` or raise if unknown."""
@@ -198,6 +214,32 @@ class CuaEngine:
         from cerebellum_cua.capture import get_capture_backend  # noqa: PLC0415
 
         return get_capture_backend(kind or self.capture_backend_kind)
+
+    def record_capture(self, target: dict[str, Any], config: MatrixConfig, kind: str) -> None:
+        """Remember the context of the last live capture for later re-capture."""
+        self.last_capture = {"target": dict(target), "config": config, "kind": kind}
+
+    def recapture(self) -> Snapshot | None:
+        """Rebuild a fresh (un-persisted) snapshot of the last-captured target.
+
+        Used by the verification loop to observe the post-action UI. Returns
+        ``None`` (rather than raising) when no prior capture context exists or no
+        backend can run here, so verification degrades to ``verified=null``.
+        """
+        ctx = self.last_capture
+        if ctx is None:
+            return None
+        from cerebellum_cua.capture import (  # noqa: PLC0415
+            CaptureNotAvailable,
+            capture_snapshot,
+            get_capture_backend,
+        )
+
+        try:
+            backend = get_capture_backend(ctx["kind"])
+            return capture_snapshot(backend, ctx["target"], ctx["config"], self.current_epoch)
+        except (CaptureNotAvailable, ImportError):
+            return None
 
     # --- protocol entry point -------------------------------------------
     def handle_line(self, raw_line: str) -> str:

@@ -7,10 +7,12 @@ raised when no input method is available.
 
 from __future__ import annotations
 
+import threading
 from typing import Any
 
 import pytest
 
+from cerebellum_cua.capture.abort import AbortedByUser
 from cerebellum_cua.capture.input import SyntheticInput, SyntheticInputError
 
 
@@ -104,6 +106,95 @@ def test_nonzero_exit_raises(monkeypatch: Any) -> None:
     si = _ydotool_input(monkeypatch, rec)
     with pytest.raises(SyntheticInputError):
         si.type_text("x")
+
+
+def test_drag_emits_press_glide_release_in_order(monkeypatch: Any) -> None:
+    """Instant drag: move-to-start, press, move-to-end, release — that order."""
+    rec = _Recorder()
+    si = _ydotool_input(monkeypatch, rec)
+    assert si.drag(10, 20, 110, 220) is True
+    assert rec.calls == [
+        ["ydotool", "mousemove", "--absolute", "-x", "10", "-y", "20"],   # to start
+        ["ydotool", "click", "0x40"],                                     # press left
+        ["ydotool", "mousemove", "--absolute", "-x", "110", "-y", "220"],  # to end
+        ["ydotool", "click", "0x00"],                                     # release left
+    ]
+
+
+def test_drag_right_button_uses_right_codes(monkeypatch: Any) -> None:
+    rec = _Recorder()
+    si = _ydotool_input(monkeypatch, rec)
+    si.drag(0, 0, 5, 5, button="right")
+    assert rec.calls[1] == ["ydotool", "click", "0x41"]   # right press
+    assert rec.calls[3] == ["ydotool", "click", "0x01"]   # right release
+
+
+def test_human_drag_glides_with_many_moves(monkeypatch: Any) -> None:
+    """Human drag glides both segments: more than the 4 instant calls."""
+    rec = _Recorder()
+    import cerebellum_cua.capture.input as mod
+
+    monkeypatch.setattr(mod.shutil, "which", lambda _n: "/usr/bin/ydotool")
+    monkeypatch.setattr(mod.subprocess, "run", rec.run)
+    monkeypatch.setattr(mod.time, "sleep", lambda _s: None)
+    si = SyntheticInput(prefer_ydotool=True, speed="human", steps=8)
+    assert si.drag(0, 0, 100, 0) is True
+    moves = [c for c in rec.calls if c[1] == "mousemove" and "--absolute" in c]
+    # 8 glide steps to start + 8 to end (well above the 2 instant moves).
+    assert len(moves) == 16
+    presses = [c for c in rec.calls if c[:2] == ["ydotool", "click"]]
+    assert presses == [["ydotool", "click", "0x40"], ["ydotool", "click", "0x00"]]
+
+
+def test_scroll_emits_wheel_down(monkeypatch: Any) -> None:
+    rec = _Recorder()
+    si = _ydotool_input(monkeypatch, rec)
+    assert si.scroll(50, 60, dy=3) is True
+    assert rec.calls[0] == ["ydotool", "mousemove", "--absolute", "-x", "50", "-y", "60"]
+    # positive dy = down; one wheel event with y=3.
+    assert rec.calls[1] == ["ydotool", "mousemove", "--wheel", "-x", "0", "-y", "3"]
+
+
+def test_scroll_up_is_negative_dy(monkeypatch: Any) -> None:
+    rec = _Recorder()
+    si = _ydotool_input(monkeypatch, rec)
+    si.scroll(0, 0, dy=-2)
+    assert rec.calls[1] == ["ydotool", "mousemove", "--wheel", "-x", "0", "-y", "-2"]
+
+
+def test_scroll_horizontal_axis(monkeypatch: Any) -> None:
+    rec = _Recorder()
+    si = _ydotool_input(monkeypatch, rec)
+    si.scroll(0, 0, dx=4)
+    assert rec.calls[1] == ["ydotool", "mousemove", "--wheel", "-x", "4", "-y", "0"]
+
+
+def test_abort_mid_drag_releases_and_raises(monkeypatch: Any) -> None:
+    """An abort during the held glide releases the button, then raises."""
+    si = SyntheticInput(prefer_ydotool=True, speed="human", steps=30)
+    abort = threading.Event()
+    events: list[str] = []
+
+    def _move(x: int, y: int) -> bool:
+        events.append(f"move:{x},{y}")
+        # Trip the abort partway through the *second* (held) glide.
+        if len([e for e in events if e.startswith("move")]) == 33:
+            abort.set()
+        return True
+
+    monkeypatch.setattr(si, "_move_abs", _move)
+    monkeypatch.setattr(si, "_press", lambda x, y, b: events.append("press") or True)
+    monkeypatch.setattr(si, "_release", lambda x, y, b: events.append("release") or True)
+    import cerebellum_cua.capture.input as mod
+
+    monkeypatch.setattr(mod.time, "sleep", lambda _s: None)
+
+    with pytest.raises(AbortedByUser):
+        si.drag(0, 0, 500, 500, abort=abort)
+    # Button was pressed, then released on abort (never left held), then raised.
+    assert "press" in events
+    assert "release" in events
+    assert events.index("press") < events.index("release")
 
 
 def test_atspi_route_used_when_available(monkeypatch: Any) -> None:

@@ -268,6 +268,11 @@ input. They are best-effort and platform-dependent (X11 XTEST via `Atspi`, or th
 `ydotool` CLI on Wayland). No `row_id` / `snapshot_id` is needed:
 
 - `{"action":"click_point","x":<int>,"y":<int>,"button":"left|right|middle","double":false}`
+- `{"action":"drag","x":<int>,"y":<int>,"x2":<int>,"y2":<int>,"button":"left|right|middle"}`
+  — press at `(x, y)`, glide to `(x2, y2)` with the button held, release.
+- `{"action":"scroll","x":<int>,"y":<int>,"dx":<int>,"dy":<int>}` — wheel scroll at
+  `(x, y)`; positive `dy` scrolls down, negative up; positive `dx` right, negative
+  left. One wheel event per non-zero axis.
 - `{"action":"type","value":"<text>"}`
 - `{"action":"key","value":"ctrl+s"}`
 
@@ -317,6 +322,56 @@ Coordinate forms return only `success` and `action`:
 
 ```json
 {"success": true, "action": "click_point"}
+```
+
+**Action verification (opt-in).** The driving agent cannot see the screen, so it
+must infer whether an action worked from the matrix. Verification re-captures the
+tree after a successful action and reports whether the UI observably changed.
+
+It runs when the engine is constructed with `verify_actions=True` **or** the
+payload carries `"verify": true` (a payload `verify` value always overrides the
+engine default). It runs only after a successful action; a failed or aborted
+action is returned unchanged. Verification reuses the existing capture path
+(re-capturing the same target/backend/config recorded by the last `build_matrix`)
+and `get_snapshot_diff`'s diff logic.
+
+When verification runs, these fields are added to the success payload:
+
+- `verified` — `true` if the UI observably changed, `false` if nothing changed
+  (the action likely had no effect — retry or adapt; this is **not** an error),
+  or `null` if re-capture was impossible.
+- `effect` — `"changed"`, `"no_change"`, or `"unknown"`.
+- `observed_change` — present when `verified` is a boolean; compact row-id lists
+  only: `{"added_row_ids":[…],"removed_row_ids":[…],"modified_row_ids":[…]}`
+  (the full field-level patches are not included).
+- `reason` — present when `verified` is `null`: `"no_pre_action_snapshot"` or
+  `"recapture_unavailable"` (headless host / no usable backend / no prior
+  `build_matrix` to replay).
+
+Verified request and response:
+
+```json
+{"msg_id":"7","operation":"invoke_action","payload":{"row_id":7,"action":"click","verify":true}}
+```
+
+```json
+{"success": true, "action": "click", "new_epoch": 3, "affected_rows": [7],
+ "verified": true, "effect": "changed",
+ "observed_change": {"added_row_ids": [12], "removed_row_ids": [], "modified_row_ids": [4]}}
+```
+
+No-change result (action ran but the UI did not move):
+
+```json
+{"success": true, "action": "click",
+ "verified": false, "effect": "no_change",
+ "observed_change": {"added_row_ids": [], "removed_row_ids": [], "modified_row_ids": []}}
+```
+
+Re-capture unavailable:
+
+```json
+{"success": true, "action": "click", "verified": null, "effect": "unknown", "reason": "recapture_unavailable"}
 ```
 
 If the element is found but the action could not be performed:

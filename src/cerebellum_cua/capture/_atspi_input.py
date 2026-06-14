@@ -67,6 +67,34 @@ class AtspiInputMixin:
         time.sleep(self.click_pause)
         return self._atspi_gen_mouse(x, y, release)
 
+    def _atspi_press(self, x: int, y: int, button: str) -> bool:
+        """Press (and hold) a mouse button at ``(x, y)`` without releasing it."""
+        return self._atspi_gen_mouse(x, y, _ATSPI_PRESS.get(button, _ATSPI_PRESS["left"]))
+
+    def _atspi_release(self, x: int, y: int, button: str) -> bool:
+        """Release a previously pressed mouse button at ``(x, y)``."""
+        return self._atspi_gen_mouse(x, y, _ATSPI_RELEASE.get(button, _ATSPI_RELEASE["left"]))
+
+    def _atspi_wheel(self, dx: int, dy: int) -> bool:
+        """Emit wheel clicks via XTEST buttons 4/5 (vertical), 6/7 (horizontal).
+
+        ``generate_mouse_event`` has no position-free wheel form, so each notch is
+        a click at the last-known cursor position. Positive ``dy`` scrolls down
+        (button 5), negative up (button 4); positive ``dx`` right, negative left.
+        """
+        x, y = self._wheel_pos()
+        ok = True
+        for _ in range(abs(dy)):
+            ok = self._atspi_gen_mouse(x, y, "b5c" if dy > 0 else "b4c") and ok
+        for _ in range(abs(dx)):
+            ok = self._atspi_gen_mouse(x, y, "b7c" if dx > 0 else "b6c") and ok
+        return ok
+
+    def _wheel_pos(self) -> tuple[int, int]:
+        """Last cursor position the host class drove to (origin until first move)."""
+        pos = getattr(self, "_last_pos", None)
+        return pos if pos is not None else (0, 0)
+
     def _atspi_type(self, text: str) -> bool:
         atspi = self._atspi()
         gen = getattr(atspi, "generate_keyboard_event", None) if atspi else None

@@ -13,9 +13,8 @@ Strategy, display-server aware:
   Wayland compositors.
 * On Wayland (``XDG_SESSION_TYPE=wayland``) or when the Atspi route is
   unavailable/fails, fall back to the ``ydotool`` CLI if it is on ``PATH``
-  (``ydotool mousemove`` / ``ydotool click`` / ``ydotool type`` / ``ydotool
-  key``). ``ydotool`` needs its daemon (``ydotoold``) running and uinput
-  permissions.
+  (argv builders live in :mod:`cerebellum_cua.capture._ydotool`). ``ydotool``
+  needs its daemon (``ydotoold``) running and uinput permissions.
 * If neither method is available, raise :class:`SyntheticInputError`.
 
 **Motion profile.** Actions are human-observable by default: the cursor *glides*
@@ -38,25 +37,12 @@ import time
 
 from cerebellum_cua.capture._atspi_input import AtspiInputMixin
 from cerebellum_cua.capture._motion import interpolate_path
+from cerebellum_cua.capture._ydotool import (
+    SyntheticInputError,
+    YdotoolInputMixin,
+)
 
-# ydotool keycode aliases for the modifiers/keys we name in a combo string. These
-# are Linux input-event keycodes (linux/input-event-codes.h), what ydotool expects.
-_YDOTOOL_KEYCODES: dict[str, int] = {
-    "ctrl": 29, "control": 29, "leftctrl": 29,
-    "shift": 42, "leftshift": 42,
-    "alt": 56, "leftalt": 56,
-    "meta": 125, "super": 125, "win": 125, "cmd": 125,
-    "enter": 28, "return": 28,
-    "tab": 15, "esc": 1, "escape": 1, "space": 57,
-    "backspace": 14, "delete": 111, "del": 111,
-    "a": 30, "b": 48, "c": 46, "d": 32, "e": 18, "f": 33, "g": 34, "h": 35,
-    "i": 23, "j": 36, "k": 37, "l": 38, "m": 50, "n": 49, "o": 24, "p": 25,
-    "q": 16, "r": 19, "s": 31, "t": 20, "u": 22, "v": 47, "w": 17, "x": 45,
-    "y": 21, "z": 44,
-}
-
-# ydotool click codes: down+up combined.
-_YDOTOOL_CLICK = {"left": "0xC0", "right": "0xC1", "middle": "0xC2"}
+__all__ = ["SyntheticInput", "SyntheticInputError"]
 
 # A sensible starting point for the first glide when no prior position is known.
 _DEFAULT_ORIGIN = (960, 540)
@@ -67,11 +53,7 @@ def _aborted(abort: threading.Event | None) -> bool:
     return abort is not None and abort.is_set()
 
 
-class SyntheticInputError(RuntimeError):
-    """Raised when no synthetic-input method is available on this host."""
-
-
-class SyntheticInput(AtspiInputMixin):
+class SyntheticInput(AtspiInputMixin, YdotoolInputMixin):
     """Best-effort, human-paced synthetic mouse/keyboard input.
 
     Motion is tunable via the constructor:
@@ -154,6 +136,49 @@ class SyntheticInput(AtspiInputMixin):
             return True
         return self._ydotool_key(combo)
 
+    def drag(
+        self,
+        x1: int,
+        y1: int,
+        x2: int,
+        y2: int,
+        button: str = "left",
+        abort: threading.Event | None = None,
+    ) -> bool:
+        """Drag ``button`` from ``(x1, y1)`` to ``(x2, y2)``.
+
+        Emits, in order: glide to the start, press-and-hold the button, glide to
+        the end (the held drag path, honoring ``abort`` between steps), release.
+        In ``instant`` mode the two glides collapse to single jumps. Raises
+        :class:`~cerebellum_cua.capture.abort.AbortedByUser` if ``abort`` fires
+        mid-motion (the button is released first so nothing is left held).
+        """
+        from cerebellum_cua.capture.abort import AbortedByUser  # noqa: PLC0415
+
+        self._glide(int(x1), int(y1), abort)
+        self._press(int(x1), int(y1), button)
+        try:
+            self._glide(int(x2), int(y2), abort)
+        except AbortedByUser:
+            self._release(int(x2), int(y2), button)
+            raise
+        return self._release(int(x2), int(y2), button)
+
+    def scroll(self, x: int, y: int, dx: int = 0, dy: int = 0) -> bool:
+        """Scroll the wheel at ``(x, y)`` by ``dx`` horizontal / ``dy`` vertical.
+
+        Positive ``dy`` scrolls down, negative up; positive ``dx`` right, negative
+        left. The pointer is positioned first, then one wheel event per non-zero axis.
+        """
+        self._move_abs(int(x), int(y))
+        self._last_pos = (int(x), int(y))
+        ok = True
+        if dy:
+            ok = self._wheel(0, int(dy)) and ok
+        if dx:
+            ok = self._wheel(int(dx), 0) and ok
+        return ok
+
     # --- motion: cursor glide -------------------------------------------
     def _glide(
         self, x: int, y: int, abort: threading.Event | None
@@ -184,9 +209,7 @@ class SyntheticInput(AtspiInputMixin):
         """Emit one absolute pointer move via the active backend."""
         if not self._prefer_ydotool and self._atspi_move(x, y):
             return True
-        return self._ydotool(
-            ["mousemove", "--absolute", "-x", str(int(x)), "-y", str(int(y))]
-        )
+        return self._ydotool_move(x, y)
 
     # --- clicks ----------------------------------------------------------
     def _atomic_click(self, x: int, y: int, button: str, double: bool) -> bool:
@@ -236,21 +259,26 @@ class SyntheticInput(AtspiInputMixin):
         delay_ms = str(int(self.key_delay * 1000))
         return self._ydotool(["type", "--key-delay", delay_ms, "--", text])
 
-    # --- ydotool route ---------------------------------------------------
-    def _ydotool_click(self, button: str, double: bool) -> bool:
-        code = _YDOTOOL_CLICK.get(button, "0xC0")
-        repeat = ["--repeat", "2"] if double else []
-        return self._ydotool(["click", *repeat, code])
+    # --- press / release / wheel (shared by drag + scroll) ---------------
+    def _press(self, x: int, y: int, button: str) -> bool:
+        """Press and hold ``button`` at ``(x, y)`` via the active backend."""
+        if not self._prefer_ydotool and self._atspi_press(x, y, button):
+            return True
+        return self._ydotool_press(button)
 
-    def _ydotool_key(self, combo: str) -> bool:
-        parts = [p.strip().lower() for p in combo.split("+") if p.strip()]
-        codes = [_YDOTOOL_KEYCODES.get(p) for p in parts]
-        if not codes or any(c is None for c in codes):
-            raise SyntheticInputError(f"unmappable key combo for ydotool: {combo!r}")
-        press = [f"{c}:1" for c in codes]
-        release = [f"{c}:0" for c in reversed(codes)]
-        return self._ydotool(["key", *press, *release])
+    def _release(self, x: int, y: int, button: str) -> bool:
+        """Release a held ``button`` at ``(x, y)`` via the active backend."""
+        if not self._prefer_ydotool and self._atspi_release(x, y, button):
+            return True
+        return self._ydotool_release(button)
 
+    def _wheel(self, dx: int, dy: int) -> bool:
+        """Emit one wheel event via the active backend (positive dy = down)."""
+        if not self._prefer_ydotool and self._atspi_wheel(dx, dy):
+            return True
+        return self._ydotool_wheel(dx, dy)
+
+    # --- ydotool subprocess runner (argv builders live in _ydotool) ------
     @staticmethod
     def _ydotool(args: list[str]) -> bool:
         if shutil.which("ydotool") is None:

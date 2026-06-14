@@ -26,7 +26,9 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
     from cerebellum_cua.cli.engine import CuaEngine
 
 # Coordinate / raw-input actions that bypass the a11y tree entirely.
-_COORDINATE_ACTIONS = frozenset({"click_point", "type", "key"})
+_COORDINATE_ACTIONS = frozenset(
+    {"click_point", "type", "key", "drag", "scroll"}
+)
 
 _NO_BACKEND = (
     "Live action execution is unavailable on this host: no capture backend could "
@@ -81,6 +83,19 @@ def _coordinate_action(
                 button=str(payload.get("button", "left")),
                 double=bool(payload.get("double", False)),
                 abort=abort,
+            )
+        elif action == "drag":
+            ok = si.drag(
+                int(payload["x"]), int(payload["y"]),
+                int(payload["x2"]), int(payload["y2"]),
+                button=str(payload.get("button", "left")),
+                abort=abort,
+            )
+        elif action == "scroll":
+            ok = si.scroll(
+                int(payload["x"]), int(payload["y"]),
+                dx=int(payload.get("dx", 0)),
+                dy=int(payload.get("dy", 0)),
             )
         elif action == "type":
             ok = si.type_text(str(payload.get("value", "")), abort=abort)
