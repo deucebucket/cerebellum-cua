@@ -61,6 +61,7 @@ class OperationHandlers:
             "read_text": self.read_text,
             "run_skill": self.run_skill,
             "list_windows": self.list_windows,
+            "elevate": self.elevate,
             **representation_ops(self),
         }
 
@@ -243,6 +244,23 @@ class OperationHandlers:
             "backend": used,
             "count": len(windows),
         }
+
+    # --- elevate (answer a privilege-escalation prompt) -----------------
+    def elevate(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Drive a privilege-escalation prompt (polkit / sudo / UAC).
+
+        Payload: ``{method?: "auto"|"polkit"|"sudo"|"uac", command?: [str, ...]}``.
+        The elevation password is **never** accepted via the payload — it is
+        sourced only from the ``.env`` / environment config
+        (``CEREBELLUM_ELEVATION_PASSWORD``); leave it unset to disable
+        elevation. ``auto`` drives a visible polkit dialog, else runs ``command``
+        under sudo, else reports a human is needed. Windows UAC always reports
+        ``needs_human`` (it runs on the secure desktop). Returns an
+        ``ElevationResult`` dict — the password never appears in any field.
+        """
+        from cerebellum_cua.elevation import elevate_op  # noqa: PLC0415 - lazy
+
+        return elevate_op(self._engine, payload)
 
     # --- read_text (aggregate on-screen text + coords) ------------------
     def read_text(self, payload: dict[str, Any]) -> dict[str, Any]:

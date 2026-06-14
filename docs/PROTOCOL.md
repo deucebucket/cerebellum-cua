@@ -925,3 +925,55 @@ persists each patch as `{snapshot_id, epoch, patch_type, affected_row_ids,
 patch_json}` for replay. The async push path is part of the v4.2 contract;
 the patch *content* mirrors the `get_snapshot_diff` payload
 (`added_row_ids` / `removed_row_ids` / `modified_row_ids` / `patches`).
+
+## elevate operation
+
+`elevate` answers a privilege-escalation prompt as part of a task: a Linux
+polkit authentication dialog, an interactive terminal `sudo`, or (on Windows)
+the UAC consent dialog. It is opt-in and depends on an elevation password
+configured out of band.
+
+Request payload:
+
+```json
+{"method": "auto", "command": ["systemctl", "restart", "foo"]}
+```
+
+- `method` (optional, default `"auto"`): one of `"auto"`, `"polkit"`, `"sudo"`,
+  `"uac"`.
+  - `auto` drives a polkit dialog if one is currently visible (detected from the
+    WM via `list_windows`); otherwise runs `command` under `sudo`; otherwise
+    reports that a human is needed.
+  - `polkit` fills a visible polkit dialog's password field and clicks
+    Authenticate (reusing `build_matrix` + `invoke_action`).
+  - `sudo` runs `command` under `sudo -S`, feeding the password on stdin.
+  - `uac` always reports `needs_human` (see the Windows note below).
+- `command` (optional): the argv to run elevated (used by `sudo`; context only
+  for `uac`).
+- The password is **never accepted via the payload**. It is read only from the
+  `CEREBELLUM_ELEVATION_PASSWORD` environment variable / `.env` file. Leave it
+  unset to disable elevation entirely.
+
+Response payload (`ElevationResult`):
+
+```json
+{"success": false, "method": "sudo", "needs_human": true, "detail": "sudo is not available on this host", "extra": {}}
+```
+
+- `success`: whether elevation was driven/granted.
+- `method`: which backend ran (`polkit` / `sudo` / `uac` / `none`).
+- `needs_human`: true when no automated path can proceed and a person must
+  complete the prompt.
+- `detail`: a short, **redacted** status string. The password never appears in
+  `detail` or anywhere else in the response.
+- `extra`: non-sensitive structured context (return code, snapshot id, …).
+
+### Windows UAC limit (honest)
+
+The UAC consent dialog runs on the **secure desktop**, an isolated desktop that
+a non-elevated process without `uiAccess` cannot read or click. This tool
+therefore cannot drive the UAC prompt: `method: "uac"` returns
+`success: false, needs_human: true`. The only honest ways past UAC are for the
+tool's own process to already be elevated / hold `uiAccess`, or for a human to
+accept the prompt. Relaunching via `runas` still surfaces a UAC dialog a person
+must approve.
