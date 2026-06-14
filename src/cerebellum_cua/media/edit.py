@@ -92,7 +92,7 @@ def build_trim_concat_xfade_cmd(
 
     argv = ["ffmpeg", "-y", "-i", in_path, "-filter_complex", ";".join(filter_lines)]
     argv += ["-map", last_v]
-    if with_audio:
+    if with_audio and last_a is not None:
         argv += ["-map", last_a]
     argv += [out_path]
     return argv

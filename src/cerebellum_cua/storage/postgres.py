@@ -1,6 +1,7 @@
 """PostgreSQL v4.2 implementation of ``StorageBackend`` (production backend).
 
-Mirrors the canonical schema in ``sql/cerebellum_cua_v42_schema.sql`` and the reference
+Mirrors the canonical schema shipped as package data in
+``cerebellum_cua/storage/schema/cerebellum_cua_v42_schema.sql`` and the reference
 persistence logic from the spec (the design spec, Section 5). ``psycopg2`` is
 imported lazily inside ``connect`` so importing this module never fails on a host
 without the optional ``postgres`` extra installed.
@@ -11,6 +12,7 @@ already-built token string is merely stored/validated here with a server-side TT
 
 from __future__ import annotations
 
+from importlib import resources
 from pathlib import Path
 from typing import Any
 
@@ -20,17 +22,34 @@ from cerebellum_cua.storage import _rowmap as rm
 from cerebellum_cua.storage.base import StorageBackend
 
 _SCHEMA_FILE = "cerebellum_cua_v42_schema.sql"
+_SCHEMA_PACKAGE = "cerebellum_cua.storage.schema"
 _PARENT = rm.PARENT_EDGE_CODE
 
 
+def load_schema_ddl() -> str:
+    """Return the canonical v4.2 DDL text from packaged data.
+
+    Reads the schema via :mod:`importlib.resources` so it works from an installed
+    wheel (no repo-relative ``sql/`` exists there), falling back to a filesystem
+    lookup for source/editable checkouts.
+    """
+    try:
+        return resources.files(_SCHEMA_PACKAGE).joinpath(_SCHEMA_FILE).read_text("utf-8")
+    except (FileNotFoundError, ModuleNotFoundError):
+        return _find_schema_path().read_text(encoding="utf-8")
+
+
 def _find_schema_path() -> Path:
-    """Locate the canonical DDL relative to the installed package / repo root."""
+    """Locate the canonical DDL on disk (source checkouts), preferring package data."""
     here = Path(__file__).resolve()
+    packaged = here.parent / "schema" / _SCHEMA_FILE
+    if packaged.is_file():
+        return packaged
     for base in here.parents:
         candidate = base / "sql" / _SCHEMA_FILE
         if candidate.is_file():
             return candidate
-    raise FileNotFoundError(f"Could not locate sql/{_SCHEMA_FILE} near {here}")
+    raise FileNotFoundError(f"Could not locate {_SCHEMA_FILE} near {here}")
 
 
 class PostgresBackend(StorageBackend):
@@ -61,8 +80,10 @@ class PostgresBackend(StorageBackend):
         return self._conn.cursor(cursor_factory=self._extras.RealDictCursor)
 
     def init_schema(self) -> None:
-        path = self._schema_path or _find_schema_path()
-        ddl = Path(path).read_text(encoding="utf-8")
+        if self._schema_path is not None:
+            ddl = Path(self._schema_path).read_text(encoding="utf-8")
+        else:
+            ddl = load_schema_ddl()
         with self._conn.cursor() as cur:
             cur.execute(ddl)
         self._conn.commit()

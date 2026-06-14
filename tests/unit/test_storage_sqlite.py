@@ -201,6 +201,26 @@ class TestGetBackendFactory:
         assert isinstance(be, PostgresBackend)
 
 
+class TestPackagedSchema:
+    """The Postgres DDL must ship inside the package and load from an install."""
+
+    def test_load_schema_ddl_returns_v42_ddl(self):
+        from cerebellum_cua.storage.postgres import load_schema_ddl
+
+        ddl = load_schema_ddl()
+        assert "CREATE TABLE" in ddl
+        assert "matrix_snapshots" in ddl
+        assert "elements" in ddl
+
+    def test_schema_resource_present_in_package(self):
+        from importlib import resources
+
+        res = resources.files("cerebellum_cua.storage.schema").joinpath(
+            "cerebellum_cua_v42_schema.sql"
+        )
+        assert res.is_file()
+
+
 @pytest.mark.postgres
 class TestPostgresBackend:
     """Live Postgres round-trip; auto-skips unless MATRIX_UI_PG_DSN is set."""

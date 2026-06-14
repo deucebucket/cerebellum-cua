@@ -104,3 +104,33 @@ e.g. `feat(capture): add macOS AX backend`.
 PRs must pass CI (lint and the Linux test matrix) before they can be merged. Keep
 changes focused, include tests for new behavior, and update the relevant docs in
 `docs/` when you change the protocol, the capture seam, or the install steps.
+
+## Releasing
+
+Releases are built and published by the `Release` GitHub Actions workflow
+(`.github/workflows/release.yml`), triggered by pushing a version tag.
+
+1. Bump `version` in `pyproject.toml` (single source of truth) and update
+   `CHANGELOG.md`.
+2. Verify locally before tagging:
+
+   ```bash
+   python -m build                                  # sdist + wheel
+   twine check dist/*
+   python -m zipfile -l dist/*.whl | grep -i schema # schema must be in the wheel
+   ```
+
+   Do not commit `dist/` or `*.egg-info/` — both are gitignored.
+3. Commit, then tag and push:
+
+   ```bash
+   git tag v0.1.0
+   git push origin v0.1.0
+   ```
+
+The workflow builds the sdist and wheel, runs `twine check`, and uploads to PyPI
+via **Trusted Publishing** (OIDC) — no API token is stored in the repo. This
+requires one-time maintainer setup (see the header comment in
+`release.yml`): register a Trusted Publisher on PyPI pointing at this repo and
+the `release.yml` workflow, and create a `pypi` environment in the repository
+settings.
