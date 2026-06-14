@@ -49,20 +49,33 @@ operation is opt-in and must be called explicitly (see
 [docs/PROTOCOL.md](docs/PROTOCOL.md) and
 [docs/AGENT_INTEGRATION.md](docs/AGENT_INTEGRATION.md)).
 
+An optional **vision capture backend** (`capture_backend="vision"`) extracts
+structured elements from a screenshot for apps that expose no accessibility tree
+(games, canvas, custom-drawn UIs). It runs OCR and rectangle detection, then emits
+the same structured element records as the accessibility backends — bounding boxes,
+text, and a heuristic type guess — not raw pixels, so the token budget is
+preserved. It is behind the same capture seam and requires the optional `vision`
+extras plus the system `tesseract-ocr` binary; without them it reports itself
+unavailable.
+
 ## What it does not do
 
-- No OCR and no bundled vision model. The optional `screenshot` operation returns
-  an image file for an external model to inspect; it performs no analysis itself.
+- No bundled vision model. The optional `screenshot` operation returns an image
+  file for an external model to inspect; the optional `vision` backend uses OCR
+  and rectangle detection (not a neural model) to derive structured elements.
 - It is not an autonomous agent and contains no LLM. It is a capture/serving
   layer that an agent (or a human script) drives over JSONL.
-- It does not bypass OS accessibility: if an application exposes nothing to the
-  accessibility tree, `cerebellum-cua` captures nothing for it.
+- The default accessibility path does not bypass OS accessibility: if an
+  application exposes nothing to the accessibility tree, the a11y backends capture
+  nothing for it (the optional `vision` backend is the screenshot-based fallback).
 
 ## Limitations
 
 - **Accessibility-tree coverage is not universal.** Legacy, custom-drawn, or
   canvas-based applications can expose a near-empty tree; captures of those apps
-  will be sparse or empty.
+  will be sparse or empty. The optional `vision` backend covers some of these by
+  deriving structured elements from a screenshot, at lower fidelity (types are
+  inferred from shape and OCR text rather than read from real roles).
 - **Capture latency.** Generating a full tree can take noticeable time on large
   UIs; this is inherent to the accessibility APIs.
 - **Linux requires the a11y bus to be running and apps to expose trees.** On
@@ -76,6 +89,7 @@ operation is opt-in and must be called explicitly (see
 pip install -e .                 # core (SQLite backend, JSONL CLI)
 pip install -e '.[postgres]'     # + PostgreSQL backend
 pip install -e '.[uia]'          # Windows only: live UIA capture
+pip install -e '.[vision]'       # screenshot-based capture (also needs system tesseract-ocr)
 pip install -e '.[dev]'          # tests + lint
 ```
 

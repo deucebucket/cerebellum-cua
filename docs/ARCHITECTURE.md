@@ -66,6 +66,7 @@ libraries lazily so that importing the package never fails on the wrong OS.
 |  gateway     |  |  events      |  |  capture                   |
 |  accordion,  |  |  UIA event   |  |  CaptureBackend seam:      |
 |  JWT tokens, |  |  manager +   |  |  uia_backend / atspi /     |
+|              |  |              |  |  vision (screenshot)       |
 |  protocol    |  |  coalescer   |  |  (future macOS AX)         |
 +--------------+  +--------------+  +----------------------------+
         |                                  |
@@ -153,7 +154,33 @@ Current backends:
   `Atspi` bindings. Its `is_available()` probes the `org.a11y.Bus` address over
   D-Bus *without* calling `Atspi.init()`, because `Atspi.init()` against a dead
   bus can hard-abort the process.
+- **vision** (any OS) — derives the same structured element stream from a
+  *screenshot* instead of an accessibility tree, so apps that expose no
+  accessibility (games, canvas UIs, custom-drawn widgets) are still drivable. It
+  grabs one screenshot (reusing `capture/screenshot.py`), runs OCR (Tesseract)
+  for text + word boxes and OpenCV contour detection for rectangle candidates,
+  fuses them (text folded into its enclosing box), classifies each region into a
+  `ControlType` by geometry heuristics, and yields `CapturedElement`s. Output is
+  STRUCTURED (coords + OCR text + type guess), never raw pixels, so the token
+  budget downstream is unchanged. `native_ref` is `None`; actions are executed by
+  coordinates via `SyntheticInput`. `is_available()` is `True` only when a
+  grabber, OpenCV and Tesseract are all usable, and is fully guarded so importing
+  the package needs none of them. See "a11y vs vision" below.
 - **macOS AX** — named as a future slot in the seam's contract; not implemented.
+
+### a11y vs vision, and fusion
+
+The accessibility backends (UIA, AT-SPI) are the default, high-fidelity path:
+they read real roles, names, states and patterns from the OS tree. The vision
+backend is the fallback for surfaces the a11y tree cannot see. It is lower
+fidelity by nature — types are *inferred* from shape and OCR text, and conservative
+heuristics fall back to `CUSTOM` rather than guess wrongly — but it works where no
+a11y data exists. Because both backends emit the identical `CapturedElement`
+contract behind the same seam, everything downstream (driver, matrix, gateway,
+actions) is unchanged regardless of source. The two are not yet *fused* into a
+single capture; an agent chooses one backend per capture (e.g. a11y for normal
+apps, vision for a game window). A future fusion step could overlay vision-detected
+regions onto a sparse a11y tree to fill gaps; the seam already permits it.
 
 The `CapturedElement` dataclass carries an opaque `native_ref` (a COM element or
 an `Atspi.Accessible`) used only by the backend for later action execution. It is

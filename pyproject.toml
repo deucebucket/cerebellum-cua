@@ -19,6 +19,11 @@ uia = ["uiautomation>=2.0", "comtypes>=1.2"]
 postgres = ["psycopg2-binary>=2.9"]
 # MCP server wrapper (exposes the five operations as MCP tools).
 mcp = ["mcp>=1.0"]
+# Vision capture backend: derive structured elements from a screenshot for apps
+# without accessibility. Also requires the SYSTEM `tesseract-ocr` binary on PATH
+# (e.g. `apt install tesseract-ocr` / `dnf install tesseract`) — the Python
+# `pytesseract` wheel is only a thin wrapper around it.
+vision = ["opencv-python-headless>=4.8", "pytesseract>=0.3"]
 # User-takeover kill-switch: read Linux evdev devices to detect real user input
 # during synthetic motion. Linux-only; needs read access to /dev/input (user in
 # the `input` group). Optional — without it the kill-switch degrades to a no-op.
