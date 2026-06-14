@@ -155,6 +155,47 @@ def _index_chain(accessible: Any) -> list[int]:
     return chain
 
 
+def _descriptor_chain(accessible: Any) -> tuple[list[dict[str, Any]], str]:
+    """Build a role+name descriptor path for robust re-acquisition.
+
+    Walks parents collecting one descriptor per level, root-first, then drops the
+    desktop root itself so the chain starts at the desktop's child (the
+    application) and ends at ``accessible``. Each descriptor is
+    ``{"i": <index_in_parent, may be -1>, "role": <role name>, "name": <name>}``.
+
+    AT-SPI returns ``-1`` for ``get_index_in_parent()`` on some real nodes
+    (applications, title bars, fillers) even though they have a parent, so the
+    index is only a hint; the role (and name when present) anchor the walk.
+
+    Returns the descriptor list and the application name (top node under the
+    desktop), the latter used as a re-acquisition anchor. Both are empty when the
+    walk cannot reach the tree.
+    """
+    levels: list[dict[str, Any]] = []
+    node: Any = accessible
+    seen: set[int] = set()
+    for _ in range(64):  # bound the walk; deeper trees are pathological
+        if node is None or id(node) in seen:
+            break
+        seen.add(id(node))
+        try:
+            idx = int(node.get_index_in_parent())
+        except Exception:  # noqa: BLE001
+            idx = -1
+        levels.append({"i": idx, "role": _role_name(node), "name": _name(node)})
+        try:
+            node = node.get_parent()
+        except Exception:  # noqa: BLE001
+            node = None
+    levels.reverse()
+    # Drop the desktop root: the re-acquire walk starts AT the desktop and
+    # descends into its children, so the first descriptor must be the application.
+    if levels:
+        levels = levels[1:]
+    app_name = levels[0]["name"] if levels else ""
+    return levels, app_name
+
+
 def _derive_patterns(states: set[str], interfaces: set[str]) -> dict[str, Any]:
     """Map supported AT-SPI interfaces/states to canonical pattern flags."""
     patterns: dict[str, Any] = {}
@@ -214,9 +255,12 @@ def convert(accessible: Any) -> CapturedElement:
 
     runtime_id = _index_chain(accessible)
 
-    # ``atspi_path`` is the raw root-first index chain persisted in metadata so the
-    # backend can re-acquire this element after a DB round-trip (when native_ref is
-    # gone). It is the same chain runtime_id is derived from, kept verbatim.
+    # ``runtime_id`` (the int index chain) is kept UNCHANGED for dedup/hashing.
+    # ``atspi_path`` is a richer per-level descriptor list (role+name+index hint),
+    # root-first from the desktop's child (the application) down to this node, so
+    # the backend can re-acquire after a DB round-trip even when AT-SPI reports a
+    # ``-1`` index mid-path. ``atspi_app`` anchors the walk at the right app.
+    descriptors, app_name = _descriptor_chain(accessible)
     return CapturedElement(
         control_type=control_type,
         name=name,
@@ -232,7 +276,8 @@ def convert(accessible: Any) -> CapturedElement:
         metadata={
             "atspi_role": role,
             "interactive_kind": interactive_kind,
-            "atspi_path": list(runtime_id),
+            "atspi_path": descriptors,
+            "atspi_app": app_name,
         },
         native_ref=accessible,
     )
