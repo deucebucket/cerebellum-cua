@@ -24,6 +24,10 @@ mcp = ["mcp>=1.0"]
 # (e.g. `apt install tesseract-ocr` / `dnf install tesseract`) — the Python
 # `pytesseract` wheel is only a thin wrapper around it.
 vision = ["opencv-python-headless>=4.8", "pytesseract>=0.3"]
+# Adjacent media pipeline: optional audio-transcript backend. The `ffmpeg` and
+# `ffprobe` binaries this module shells out to are SYSTEM tools (install FFmpeg),
+# not Python packages, so they are not listed here.
+media = ["faster-whisper>=1.0"]
 # User-takeover kill-switch: read Linux evdev devices to detect real user input
 # during synthetic motion. Linux-only; needs read access to /dev/input (user in
 # the `input` group). Optional — without it the kill-switch degrades to a no-op.
