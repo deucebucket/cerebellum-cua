@@ -55,6 +55,7 @@ class OperationHandlers:
             "get_snapshot_diff": self.get_snapshot_diff,
             "screenshot": self.screenshot,
             "read_text": self.read_text,
+            "run_skill": self.run_skill,
         }
 
     # --- build_matrix ----------------------------------------------------
@@ -241,6 +242,30 @@ class OperationHandlers:
                 }
             )
         return {"texts": texts, "count": len(texts)}
+
+    # --- run_skill (resolve + act + optional verify) ---------------------
+    def run_skill(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Run one named skill: resolve a target, act on it, return the result.
+
+        Payload: ``{skill: str, args: dict, snapshot_id?: int, capture?: bool}``.
+        When ``capture`` is true (or nothing is persisted yet) a fresh
+        ``build_matrix`` runs first, so resolution works from a cold start (e.g.
+        'open my computer'). ``snapshot_id`` (if given) is threaded into the
+        skill args so it resolves against that specific snapshot. The response is
+        the skill result dict; an unknown skill yields
+        ``{"success": False, "reason": "unknown_skill"}``.
+        """
+        from cerebellum_cua.skills import run_skill  # noqa: PLC0415 - lazy
+
+        eng = self._engine
+        capture = bool(payload.get("capture"))
+        if capture or eng.storage.get_last_snapshot_id() is None:
+            self.build_matrix({"target": payload.get("target") or {}})
+        name = str(payload.get("skill") or "")
+        args = dict(payload.get("args") or {})
+        if payload.get("snapshot_id") is not None:
+            args.setdefault("snapshot_id", int(payload["snapshot_id"]))
+        return run_skill(eng, name, args)
 
     # --- get_snapshot_diff (in-memory epoch history) ---------------------
     def get_snapshot_diff(self, payload: dict[str, Any]) -> dict[str, Any]:
