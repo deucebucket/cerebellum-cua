@@ -189,6 +189,42 @@ taxonomy: the integer values of `cerebellum_cua.model.ControlType` (UIA-derived)
 Each backend maps its native roles into that taxonomy so the predicate and
 semantics layers are uniform across platforms.
 
+### The desktop / window-state layer
+
+The a11y and vision backends both look *inside* a window. The desktop layer
+(`cerebellum_cua.desktop`) looks at the *arrangement of windows* — which top-level
+windows exist, which one is active, each window's geometry, state (maximized /
+minimized / fullscreen / shaded) and workspace. That information already lives in
+the window manager / compositor, which is its authoritative owner; reading it from
+there is cheaper and more reliable than re-deriving it from the a11y tree.
+
+A typical agent flow is two-step: call `list_windows` to see the whole desktop
+cheaply (a handful of rows, one per window), pick the window of interest, then
+call `build_matrix` to drill into just that window's a11y tree. The window-state
+layer does not replace a11y/vision — it sits beside them as the top-level index.
+
+It is display-server aware and fully guarded, mirroring the screenshot module's
+subprocess-and-`shutil.which` style (no hard dependency on any WM tool):
+
+- **X11**: `wmctrl -l -G -p` provides the window list (id, workspace, pid,
+  geometry, title); `xprop _NET_WM_STATE` per window and the root
+  `_NET_ACTIVE_WINDOW` add state flags and the active window. If `wmctrl` is
+  absent it falls back to `xdotool`. Output parsing is isolated in pure functions
+  (`parse_wmctrl`, `parse_net_wm_state`, `parse_active_window`) so it is unit-
+  tested against captured sample text with no live WM.
+- **KWin (Wayland)**: honestly unsupported today. KWin has no stable
+  window-enumeration method over plain D-Bus across versions; a complete list
+  needs a loaded KWin script that walks `workspace.windowList()` and emits JSON.
+  Until that ships, the backend returns `[]` rather than fabricate data (TODO #23).
+- **wlroots**: note-only. `wlr-foreign-toplevel-management` is a Wayland protocol
+  with no CLI client; consuming it requires a Wayland client library, which this
+  pure-subprocess layer avoids. Returns `[]`.
+
+`list_windows(backend="auto")` selects by display server; `available()` reports
+the usable backend name (or `None`). On a host with no usable backend the engine
+operation returns `{"windows": [], "backend": null, "count": 0}` rather than
+erroring, so "no window source" and "no windows" are handled the same way.
+
 ## Data flow
 
 ```

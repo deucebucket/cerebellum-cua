@@ -39,6 +39,40 @@ Omit `path` to have a temp file created and its path returned. On a host with no
 screenshot tool installed the call returns error `1006` with a `reason` of
 `screenshot_unavailable` (see [PROTOCOL.md](PROTOCOL.md)).
 
+## Seeing the desktop layout cheaply: list_windows
+
+Before drilling into any one window, you can see the whole desktop in a single
+cheap call. `list_windows` reads top-level window state straight from the window
+manager — which windows exist, which is active, each window's geometry, state
+(maximized / minimized / fullscreen / shaded) and workspace. That is the WM's
+authoritative data; it is cheaper and more reliable than inferring the desktop
+arrangement from the a11y tree.
+
+The intended pattern is **list, then drill in**: call `list_windows` to pick the
+window you care about, then `build_matrix` to capture just that window's a11y
+tree. The window-state view is a handful of rows (one per window), not a full
+tree, so it costs almost nothing to keep oriented.
+
+```jsonl
+→ {"msg_id":"1","operation":"list_windows","payload":{}}
+← {"msg_id":"1","type":"response","operation":"list_windows","payload":{"backend":"x11","count":2,"windows":[{"id":"0x3600007","title":"Firefox","app":"","pid":12345,"bounds":{"left":100,"top":200,"width":800,"height":600,"dpi":96},"active":true,"state":["maximized"],"workspace":0},{"id":"0x1000003","title":"konsole","app":"","pid":777,"bounds":{"left":0,"top":640,"width":960,"height":400,"dpi":96},"active":false,"state":[],"workspace":0}]},"error":null}
+→ {"msg_id":"2","operation":"build_matrix","payload":{"target":{"pid":12345}}}
+```
+
+Pass `{"backend":"x11"|"kwin"|"wlroots"}` to force a backend; the default
+`"auto"` picks by display server. `list_windows` never errors when no window
+source is available — it returns `{"windows":[],"backend":null,"count":0}`, so
+treat an empty list as "no usable window source" and fall back to `build_matrix`
+on the active window directly.
+
+**Backend honesty.** X11 is fully supported (via `wmctrl`, falling back to
+`xdotool`). KWin (Wayland) window enumeration is **not** implemented: KWin
+exposes no stable window-list method over plain D-Bus, so a complete list needs a
+loaded KWin script — until that ships the KWin backend returns `[]` rather than
+guess. wlroots is note-only (no CLI for its toplevel protocol). On those sessions
+`list_windows` returns an empty list; rely on `screenshot` + `build_matrix`
+instead. See [PROTOCOL.md](PROTOCOL.md) for the full schema.
+
 ## Reading on-screen text with positions
 
 To read all the text currently on screen, with coordinates, in one cheap call:

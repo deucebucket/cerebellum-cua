@@ -395,6 +395,7 @@ def test_handlers_dict_exposes_operations(engine: CuaEngine) -> None:
         "screenshot",
         "read_text",
         "run_skill",
+        "list_windows",
     }
 
 
