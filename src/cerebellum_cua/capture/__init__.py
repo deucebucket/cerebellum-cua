@@ -34,8 +34,9 @@ __all__ = [
 def get_capture_backend(kind: str = "auto") -> CaptureBackend:
     """Return a capture backend.
 
-    ``kind``: "auto" (pick by OS), "uia" (Windows), or "atspi" (Linux).
-    Raises ``CaptureNotAvailable`` if the requested/auto backend cannot run here.
+    ``kind``: "auto" (pick by OS), "uia" (Windows), "atspi" (Linux), or
+    "vision" (screenshot-derived, any OS). Raises ``CaptureNotAvailable`` if the
+    requested/auto backend cannot run here.
     """
     if kind == "auto":
         kind = "uia" if sys.platform.startswith("win") else "atspi"
@@ -48,13 +49,17 @@ def get_capture_backend(kind: str = "auto") -> CaptureBackend:
         from cerebellum_cua.capture.atspi import AtspiCaptureBackend
 
         return AtspiCaptureBackend()
+    if kind == "vision":
+        from cerebellum_cua.capture.vision import VisionCaptureBackend
+
+        return VisionCaptureBackend()
     raise CaptureNotAvailable(f"unknown capture backend kind: {kind!r}")
 
 
 def available_backends() -> list[str]:
     """Names of backends that report themselves runnable on this host."""
     names: list[str] = []
-    for kind in ("uia", "atspi"):
+    for kind in ("uia", "atspi", "vision"):
         try:
             if get_capture_backend(kind).is_available():
                 names.append(kind)

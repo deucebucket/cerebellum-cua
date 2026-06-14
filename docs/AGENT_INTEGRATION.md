@@ -237,10 +237,29 @@ structured `{"error": {"code", "message", "details"}}` dict rather than raised.
 | `invoke_action`     | `row_id`, `snapshot_id`                                                                            |
 | `get_snapshot_diff` | `from_epoch`, `to_epoch`                                                                           |
 
-`build_matrix` and `invoke_action` require a live capture backend (Windows UIA or
-Linux AT-SPI); on a host without one they return the structured `1006` error,
-matching the JSONL behavior. The read paths (`get_element`, `load_children`,
-`get_snapshot_diff`) work against any persisted or seeded snapshot.
+`build_matrix` and `invoke_action` require a live capture backend (Windows UIA,
+Linux AT-SPI, or the screenshot-based vision backend); on a host without one they
+return the structured `1006` error, matching the JSONL behavior. The read paths
+(`get_element`, `load_children`, `get_snapshot_diff`) work against any persisted
+or seeded snapshot.
+
+### Choosing or forcing a capture backend
+
+`build_matrix` accepts an optional `capture_backend` argument: `"auto"` (default —
+UIA on Windows, AT-SPI on Linux), `"uia"`, `"atspi"`, or `"vision"`. Force a
+backend by name when the default does not fit, e.g. `capture_backend="vision"`.
+
+Use the **vision** backend when the target exposes no usable accessibility tree:
+games, engine/canvas-rendered UIs, custom-drawn widgets, remote-desktop / streamed
+windows, or any app where the a11y tree is empty or unreliable. It captures one
+screenshot and derives structured elements (bounding boxes + OCR text + a heuristic
+type guess), so the agent still sees a token-bounded element list rather than raw
+pixels, and acts on elements by their screen coordinates. Prefer an a11y backend
+when one is available: it carries real roles, names and states, so it is higher
+fidelity and cheaper than running OCR + contour detection. The vision backend
+needs OpenCV, `pytesseract`, the system `tesseract-ocr` binary, and a screenshot
+grabber on `PATH`; `available_backends()` reports `"vision"` only when all are
+present.
 
 ### Registering it with an MCP client
 
