@@ -163,6 +163,13 @@ in [docs/MODES.md](docs/MODES.md).
 
 Design details are in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
+## Related capabilities
+
+An **adjacent media pipeline** (`cerebellum_cua.media`) can understand and edit
+video token-cheaply — detecting motion/scene segments and rendering a crossfade
+edit while the agent reasons only over a structured cut-list. It is a sibling
+capability, not part of the UI capture core. See [docs/MEDIA.md](docs/MEDIA.md).
+
 ## Related work
 
 Using the accessibility tree (rather than screenshots) for computer-use agents is
