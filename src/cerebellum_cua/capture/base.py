@@ -114,6 +114,17 @@ class CaptureBackend(ABC):
         backend cannot run here.
         """
 
+    def reacquire(self, identity: dict[str, Any]) -> CapturedElement | None:
+        """Re-find a live element from a persisted identity (post-DB round-trip).
+
+        ``identity`` carries whatever the backend stored at capture time to locate
+        the node again without a live handle (e.g. an AT-SPI child-index path, or
+        Name + ControlType for UIA). Returns a ``CapturedElement`` with a fresh
+        ``native_ref``, or ``None`` if the element cannot be re-found here. Default
+        returns ``None``; live backends override.
+        """
+        return None
+
     def invoke(self, element: CapturedElement, action: str = "invoke", **params: Any) -> bool:
         """Execute an action (click/invoke/set_text/...) on a captured element.
 

@@ -214,6 +214,9 @@ def convert(accessible: Any) -> CapturedElement:
 
     runtime_id = _index_chain(accessible)
 
+    # ``atspi_path`` is the raw root-first index chain persisted in metadata so the
+    # backend can re-acquire this element after a DB round-trip (when native_ref is
+    # gone). It is the same chain runtime_id is derived from, kept verbatim.
     return CapturedElement(
         control_type=control_type,
         name=name,
@@ -226,6 +229,10 @@ def convert(accessible: Any) -> CapturedElement:
         is_interactive=is_interactive,
         is_content=is_content,
         framework_id=toolkit,
-        metadata={"atspi_role": role, "interactive_kind": interactive_kind},
+        metadata={
+            "atspi_role": role,
+            "interactive_kind": interactive_kind,
+            "atspi_path": list(runtime_id),
+        },
         native_ref=accessible,
     )

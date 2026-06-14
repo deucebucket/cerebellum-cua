@@ -16,8 +16,8 @@ Hard constraints honoured here:
   instead of crashing.
 
 The live ``Atspi.Accessible`` is adapted into the duck-typed shape that
-``_convert``/``_predicate`` expect via :class:`_LiveAdapter`, so all the mapping
-logic stays pure and bus-free for the unit tests.
+``_convert``/``_predicate`` expect via :class:`~cerebellum_cua.capture.atspi._adapter.LiveAdapter`,
+so all the mapping logic stays pure and bus-free for the unit tests.
 """
 
 from __future__ import annotations
@@ -27,9 +27,20 @@ import subprocess
 from collections.abc import Iterator
 from typing import Any
 
-from cerebellum_cua.capture.atspi._actions import do_action, set_text
+from cerebellum_cua.capture.atspi._actions import (
+    do_action,
+    select,
+    set_text,
+    set_value,
+)
+from cerebellum_cua.capture.atspi._adapter import LiveAdapter
 from cerebellum_cua.capture.atspi._convert import convert, read_states
 from cerebellum_cua.capture.atspi._predicate import atspi_should_include
+from cerebellum_cua.capture.atspi._reacquire import (
+    matches,
+    reacquire_path,
+    walk_path,
+)
 from cerebellum_cua.capture.base import (
     ActionNotSupported,
     CaptureBackend,
@@ -38,58 +49,6 @@ from cerebellum_cua.capture.base import (
     CaptureNotAvailable,
 )
 from cerebellum_cua.config import MatrixConfig
-
-
-class _LiveAdapter:
-    """Wrap a live ``Atspi.Accessible`` into the duck-typed surface convert reads.
-
-    The real bindings differ from our fakes in two spots: ``get_extents`` needs a
-    coord-type arg, and ``get_state_set`` returns an ``Atspi.StateSet`` (not an
-    iterable of names). This adapter normalizes both and proxies the rest.
-    """
-
-    __slots__ = ("_acc", "_coord")
-
-    def __init__(self, accessible: Any, coord_screen: Any) -> None:
-        self._acc = accessible
-        self._coord = coord_screen
-
-    # Convert reads native_ref identity via the original object, so expose it.
-    @property
-    def raw(self) -> Any:
-        return self._acc
-
-    def get_name(self) -> str:
-        return self._acc.get_name()
-
-    def get_role_name(self) -> str:
-        return self._acc.get_role_name()
-
-    def get_attributes(self) -> dict[str, str]:
-        attrs = self._acc.get_attributes()
-        return dict(attrs) if attrs else {}
-
-    def get_state_set(self) -> list[str]:
-        try:
-            ss = self._acc.get_state_set()
-            return [s.value_nick for s in ss.get_states()]
-        except Exception:  # noqa: BLE001
-            return []
-
-    def get_interfaces(self) -> list[str]:
-        try:
-            return list(self._acc.get_interfaces())
-        except Exception:  # noqa: BLE001
-            return []
-
-    def get_extents(self) -> Any:
-        return self._acc.get_extents(self._coord)
-
-    def get_index_in_parent(self) -> int:
-        return self._acc.get_index_in_parent()
-
-    def get_parent(self) -> Any:
-        return self._acc.get_parent()
 
 
 def _probe_a11y_bus() -> bool:
@@ -217,7 +176,7 @@ class AtspiCaptureBackend(CaptureBackend):
         """Recursive pre-order walk with predicate gating + depth tracking."""
         if accessible is None or depth > config.max_depth:
             return
-        adapter = _LiveAdapter(accessible, coord_screen)
+        adapter = LiveAdapter(accessible, coord_screen)
         element = convert(adapter)
         # native_ref must be the *raw* live object so id() keys match children.
         element.native_ref = accessible
@@ -253,18 +212,71 @@ class AtspiCaptureBackend(CaptureBackend):
                 child, depth + 1, child_parent_key, coord_screen, config
             )
 
+    def reacquire(self, identity: dict[str, Any]) -> CapturedElement | None:
+        """Re-find an element from its stored identity (after a DB round-trip).
+
+        ``identity`` needs ``atspi_path`` (the root-first child-index chain stored
+        in ``metadata`` at capture) and, optionally, ``role`` / ``name`` for a
+        loose verification. Walks ``Atspi.get_desktop(0)`` down those indices and
+        returns a freshly converted :class:`CapturedElement` (with ``native_ref``
+        set) for the node found there, or ``None`` on any miss or mismatch.
+
+        Guards against the C-level abort like the rest of the backend: a dead bus,
+        missing bindings, or an out-of-range index yields ``None`` rather than a
+        crash.
+        """
+        path = reacquire_path(identity)
+        if path is None:
+            return None
+        try:
+            atspi = self._atspi()
+        except CaptureNotAvailable:
+            return None
+        try:
+            node = walk_path(atspi.get_desktop(0), path)
+        except Exception:  # noqa: BLE001
+            return None
+        if node is None:
+            return None
+        adapter = LiveAdapter(node, atspi.CoordType.SCREEN)
+        element = convert(adapter)
+        element.native_ref = node
+        return element if matches(element, identity) else None
+
     def invoke(
         self, element: CapturedElement, action: str = "invoke", **params: Any
     ) -> bool:
-        """Execute an action via the live element's Action / EditableText iface."""
+        """Execute an action on the live element via the matching AT-SPI interface.
+
+        Supported actions: ``invoke``/``click``/``press`` (Action), ``set_text``
+        (EditableText), ``toggle``/``check`` (Action), ``select`` (Selection or
+        Action), ``set_value`` (Value), ``expand``/``collapse`` (Action). Raises
+        :class:`ActionNotSupported` for an unknown action or a missing interface.
+        """
         acc = element.native_ref
         if acc is None:
             raise ActionNotSupported("element has no live AT-SPI ref")
         try:
-            if action in ("set_text", "set_value"):
-                return set_text(acc, str(params.get("text", "")))
-            return do_action(acc, action)
+            return self._dispatch(acc, action, params)
         except ActionNotSupported:
             raise
         except Exception as exc:  # noqa: BLE001
             raise ActionNotSupported(f"AT-SPI action {action!r} failed: {exc}") from exc
+
+    @staticmethod
+    def _dispatch(acc: Any, action: str, params: dict[str, Any]) -> bool:
+        """Route a normalized action name to the right AT-SPI interface helper."""
+        name = action.lower()
+        _action_iface = (
+            "invoke", "click", "press", "activate", "jump",
+            "toggle", "check", "expand", "collapse",
+        )
+        if name in _action_iface:
+            return do_action(acc, name)
+        if name == "set_text":
+            return set_text(acc, str(params.get("value", params.get("text", ""))))
+        if name == "set_value":
+            return set_value(acc, float(params["value"]))
+        if name == "select":
+            return select(acc)
+        raise ActionNotSupported(f"atspi backend does not support action {action!r}")

@@ -27,7 +27,6 @@ from cerebellum_cua.gateway import Accordion, LazyTokenCodec, Protocol
 from cerebellum_cua.gateway.budget import TokenBudget
 from cerebellum_cua.model import Snapshot
 from cerebellum_cua.storage import get_backend
-from cerebellum_cua.uia import UiaClient
 
 
 class CuaEngine:
@@ -54,7 +53,6 @@ class CuaEngine:
         self.budget = TokenBudget(max_response_tokens)
         self.accordion = Accordion(self.storage, self.codec, self.budget)
         self.protocol = Protocol()
-        self.uia = UiaClient()
 
         self._handlers = OperationHandlers(self)
         self.handlers = self._handlers.as_dict()
@@ -176,6 +174,17 @@ class CuaEngine:
             mapping_id = int(cur.fetchone()[0])
         conn.commit()
         return mapping_id
+
+    # --- capture backend access (for live invoke) -----------------------
+    def get_capture_backend(self, kind: str | None = None) -> Any:
+        """Return the capture backend for ``kind`` (defaults to the engine's).
+
+        Lazily imported so the OS-specific backend libs load only when invoked.
+        Raises ``CaptureNotAvailable`` if the requested backend cannot run here.
+        """
+        from cerebellum_cua.capture import get_capture_backend  # noqa: PLC0415
+
+        return get_capture_backend(kind or self.capture_backend_kind)
 
     # --- protocol entry point -------------------------------------------
     def handle_line(self, raw_line: str) -> str:
