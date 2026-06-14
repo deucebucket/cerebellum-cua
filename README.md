@@ -17,7 +17,18 @@ backend.
 > both capture backends are implemented and unit-tested. Live capture has been
 > exercised end-to-end on Linux but is **not yet validated against a broad set of
 > real applications**, and the Windows/UIA path is **untested on real Windows**
-> in this project's CI. See [Limitations](#limitations).
+> in this project's CI. See [Limitations](#limitations) and [ROADMAP.md](ROADMAP.md).
+
+## Demo
+
+A single high-level skill driving a real app inside an isolated virtual desktop —
+`run_skill type_into` perceives the screen via the accessibility tree (no
+screenshot), moves the cursor to the field, types, then re-captures and verifies
+the change. Recorded in the container VM rig (see [docs/MODES.md](docs/MODES.md)).
+
+![cerebellum-cua driving gedit in the VM](docs/assets/skill-demo.gif)
+
+![Result: the text the agent typed, verified](docs/assets/skill-demo.png)
 
 ## What it does
 
