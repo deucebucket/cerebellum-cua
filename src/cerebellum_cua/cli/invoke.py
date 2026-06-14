@@ -124,6 +124,9 @@ def _element_action(
             reason="reacquire_failed", detail=_NO_REACQUIRE.format(row_id=row_id)
         )
 
+    if getattr(engine, "visible_cursor", False):
+        _glide_to_element(element)
+
     params = dict(payload.get("params") or {})
     if "value" in payload:
         params.setdefault("value", payload["value"])
@@ -141,6 +144,25 @@ def _element_action(
         "new_epoch": engine.current_epoch + 1,
         "affected_rows": [row_id],
     }
+
+
+def _glide_to_element(element: Element) -> None:
+    """Glide the visible cursor to the element's rect center (best-effort).
+
+    This is purely for on-screen realism so a watched desktop looks like a real
+    user is operating it; the semantic action itself still goes through the a11y
+    API. Any failure (no display, no ydotool, no XTEST) is swallowed — cursor
+    movement must never break the action it precedes.
+    """
+    rect = element.bounding_rect
+    cx = rect.left + rect.width // 2
+    cy = rect.top + rect.height // 2
+    try:
+        from cerebellum_cua.capture.input import SyntheticInput  # noqa: PLC0415
+
+        SyntheticInput().move(cx, cy)
+    except Exception:  # noqa: BLE001 - realism only; never fail the action
+        return
 
 
 def _identity(element: Element) -> dict[str, Any]:

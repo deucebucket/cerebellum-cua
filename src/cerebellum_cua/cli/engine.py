@@ -40,6 +40,7 @@ class CuaEngine:
         capture_backend_kind: str = "auto",
         max_response_tokens: int | None = None,
         user_takeover_guard: bool = True,
+        visible_cursor: bool = False,
     ) -> None:
         self.config = config or MatrixConfig()
         #: which capture backend build_matrix uses ("auto"|"uia"|"atspi").
@@ -48,6 +49,13 @@ class CuaEngine:
         #: user activity (key/mouse/panic key) cancels in-progress synthetic
         #: input. Degrades to a no-op where evdev/`/dev/input` is unavailable.
         self.user_takeover_guard = user_takeover_guard
+        #: when True, element actions first glide the visible cursor to the
+        #: element's rect center (purely for on-screen realism). The semantic
+        #: action still runs through the a11y API; the glide is best-effort and
+        #: silently skipped if no synthetic-input backend is usable. Default
+        #: False so headless/test paths are unaffected — the mode manager turns
+        #: it on for desktop/vm sessions.
+        self.visible_cursor = visible_cursor
         self.storage = get_backend(db_dsn)
         self.storage.connect()
         self.storage.init_schema()

@@ -2,8 +2,12 @@
 
 Captures the operating-system **accessibility tree** (Windows UI Automation or
 Linux AT-SPI) into a versioned **relational matrix** of UI elements and serves it
-to agents over a token-bounded, line-delimited JSON (**JSONL**) protocol. It does
-not take screenshots and does not use a vision model.
+to agents over a token-bounded, line-delimited JSON (**JSONL**) protocol.
+Perception is **hybrid**: the token-efficient accessibility tree is the default,
+and an **optional, on-demand screenshot** is available for visual verification
+when the a11y tree is insufficient (for example, custom-drawn or canvas UIs). No
+vision model is bundled; the screenshot is a separate, opt-in operation and is
+never taken automatically.
 
 `cerebellum-cua` is the perception layer ("eyes") of the broader **Cerebellum**
 project. It can also be used standalone as a computer-use-agent (CUA) capture
@@ -30,15 +34,25 @@ backend.
   signed, expiring lazy tokens), rather than the entire tree at once.
 - Maps raw control types to higher-level domain concepts (`action_button`,
   `text_input`, `menu_item`, …) via heuristic semantic rules.
+- Offers an **optional, on-demand `screenshot` operation** so an agent can
+  visually inspect the screen when the accessibility tree is insufficient. It is
+  opt-in, never part of `build_matrix`, and returns an image file plus its
+  dimensions (no analysis is performed).
 
 Sending structured accessibility data instead of screenshots reduces token usage
 relative to vision-based approaches — a documented, established technique, not
 something introduced here (see [token-cost comparison][token-cost] and
 [native-API benchmarks][native-bench]).
 
+Screenshots are not part of the default perception path: the `screenshot`
+operation is opt-in and must be called explicitly (see
+[docs/PROTOCOL.md](docs/PROTOCOL.md) and
+[docs/AGENT_INTEGRATION.md](docs/AGENT_INTEGRATION.md)).
+
 ## What it does not do
 
-- No screenshots, no OCR, no vision model.
+- No OCR and no bundled vision model. The optional `screenshot` operation returns
+  an image file for an external model to inspect; it performs no analysis itself.
 - It is not an autonomous agent and contains no LLM. It is a capture/serving
   layer that an agent (or a human script) drives over JSONL.
 - It does not bypass OS accessibility: if an application exposes nothing to the

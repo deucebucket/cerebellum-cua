@@ -53,6 +53,7 @@ class OperationHandlers:
             "load_children": self.load_children,
             "invoke_action": self.invoke_action,
             "get_snapshot_diff": self.get_snapshot_diff,
+            "screenshot": self.screenshot,
         }
 
     # --- build_matrix ----------------------------------------------------
@@ -168,6 +169,32 @@ class OperationHandlers:
         from cerebellum_cua.cli.invoke import perform_action  # noqa: PLC0415 - lazy
 
         return perform_action(self._engine, payload)
+
+    # --- screenshot (opt-in on-demand visual capture) -------------------
+    def screenshot(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Grab one screenshot of the screen and return its path + dimensions.
+
+        This is the opt-in, on-demand half of hybrid vision — NOT part of
+        ``build_matrix`` (capture stays screenshot-free by default). Payload
+        keys: ``path`` (optional destination PNG; a temp path is used when
+        absent) and ``display`` (optional X11 display override). On a host with
+        no grabber the call raises a typed ``1006`` (``UIA_ACCESS_DENIED``)
+        rather than crashing.
+        """
+        from cerebellum_cua.capture.screenshot import (  # noqa: PLC0415
+            ScreenshotError,
+            default_screenshot_path,
+            grab_screenshot,
+        )
+
+        path = str(payload.get("path") or default_screenshot_path())
+        display = payload.get("display")
+        try:
+            return grab_screenshot(path, display=display)
+        except ScreenshotError as exc:
+            raise UIAAccessDeniedError(
+                reason="screenshot_unavailable", detail=str(exc)
+            ) from exc
 
     # --- get_snapshot_diff (in-memory epoch history) ---------------------
     def get_snapshot_diff(self, payload: dict[str, Any]) -> dict[str, Any]:

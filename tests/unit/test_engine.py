@@ -192,6 +192,82 @@ def test_invoke_action_routes_to_backend_invoke(
     assert "name" in seen["identity"]
 
 
+def _stub_invoke_backend(monkeypatch: Any) -> None:
+    """Patch the capture seam so element actions re-acquire + invoke cleanly."""
+    import cerebellum_cua.capture as cap
+
+    class _StubBackend:
+        def reacquire(self, identity: dict[str, Any]) -> Any:
+            return object()
+
+        def invoke(self, live: Any, action: str, **params: Any) -> bool:
+            return True
+
+    monkeypatch.setattr(cap, "get_capture_backend", lambda kind="auto": _StubBackend())
+
+
+def test_visible_cursor_glides_to_element_center(monkeypatch: Any) -> None:
+    import cerebellum_cua.capture.input as inp
+
+    moves: list[tuple[int, int]] = []
+
+    def _fake_move(self: Any, x: int, y: int, abort: Any = None) -> bool:
+        moves.append((x, y))
+        return True
+
+    monkeypatch.setattr(inp.SyntheticInput, "move", _fake_move)
+    _stub_invoke_backend(monkeypatch)
+    eng = CuaEngine(db_dsn=None, secret=SECRET, visible_cursor=True)
+    try:
+        sid = eng.register_seed(_window_with_button(epoch=1))["snapshot_id"]
+        resp = _call(eng, "invoke_action", {"snapshot_id": sid, "row_id": 1})
+    finally:
+        eng.close()
+    assert resp["error"] is None
+    assert resp["payload"]["success"] is True
+    # The seeded element rect is left=0, top=0, width=40, height=20 -> center 20,10.
+    assert moves == [(20, 10)]
+
+
+def test_visible_cursor_off_does_not_move(monkeypatch: Any) -> None:
+    import cerebellum_cua.capture.input as inp
+
+    moves: list[tuple[int, int]] = []
+    monkeypatch.setattr(
+        inp.SyntheticInput, "move",
+        lambda self, x, y, abort=None: moves.append((x, y)) or True,
+    )
+    _stub_invoke_backend(monkeypatch)
+    eng = CuaEngine(db_dsn=None, secret=SECRET, visible_cursor=False)
+    try:
+        sid = eng.register_seed(_window_with_button(epoch=1))["snapshot_id"]
+        resp = _call(eng, "invoke_action", {"snapshot_id": sid, "row_id": 1})
+    finally:
+        eng.close()
+    assert resp["payload"]["success"] is True
+    assert moves == []
+
+
+def test_visible_cursor_glide_failure_does_not_break_action(
+    monkeypatch: Any,
+) -> None:
+    import cerebellum_cua.capture.input as inp
+
+    def _boom(self: Any, *a: Any, **k: Any) -> bool:
+        raise RuntimeError("no display / no ydotool")
+
+    monkeypatch.setattr(inp.SyntheticInput, "move", _boom)
+    _stub_invoke_backend(monkeypatch)
+    eng = CuaEngine(db_dsn=None, secret=SECRET, visible_cursor=True)
+    try:
+        sid = eng.register_seed(_window_with_button(epoch=1))["snapshot_id"]
+        resp = _call(eng, "invoke_action", {"snapshot_id": sid, "row_id": 1})
+    finally:
+        eng.close()
+    assert resp["error"] is None
+    assert resp["payload"]["success"] is True
+
+
 def test_invoke_action_click_point_uses_synthetic_input(
     engine: CuaEngine, monkeypatch: Any
 ) -> None:
@@ -245,13 +321,14 @@ def test_handle_line_malformed_json_yields_error(engine: CuaEngine) -> None:
 
 
 # --- engine wiring -------------------------------------------------------
-def test_handlers_dict_exposes_five_operations(engine: CuaEngine) -> None:
+def test_handlers_dict_exposes_operations(engine: CuaEngine) -> None:
     assert set(engine.handlers) == {
         "build_matrix",
         "get_element",
         "load_children",
         "invoke_action",
         "get_snapshot_diff",
+        "screenshot",
     }
 
 
