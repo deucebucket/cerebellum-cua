@@ -25,13 +25,15 @@ from typing import Any
 
 from cerebellum_cua.errors import MatrixUIError
 
-#: The five operations defined by the v4.2 contract.
+#: The operations the engine dispatches. The first five are the v4.2 core
+#: contract; ``screenshot`` is an opt-in on-demand visual-capture extension.
 OPERATIONS = (
     "build_matrix",
     "get_element",
     "load_children",
     "invoke_action",
     "get_snapshot_diff",
+    "screenshot",
 )
 
 UNKNOWN_OPERATION_CODE = 9999

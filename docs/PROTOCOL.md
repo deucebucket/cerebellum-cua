@@ -49,8 +49,9 @@ The error object is:
 
 ## Operations
 
-There are five operations: `build_matrix`, `get_element`, `load_children`,
-`invoke_action`, `get_snapshot_diff`. An unknown operation returns code `9999`.
+There are five core operations: `build_matrix`, `get_element`, `load_children`,
+`invoke_action`, `get_snapshot_diff`, plus one opt-in extension, `screenshot`.
+An unknown operation returns code `9999`.
 
 ### build_matrix
 
@@ -374,6 +375,64 @@ Payload fields:
   {<field>: {"old": ..., "new": ...}, ...}}`. Tracked fields are `name`,
   `class_name`, `automation_id`, `control_type`, `is_interactive`, `is_content`,
   `framework_id`, plus `bounding_rect`, `properties`, and `patterns`.
+
+### screenshot
+
+Captures a single screenshot of the screen to a file and returns its path and
+pixel dimensions. This is an **opt-in** operation: it is not part of
+`build_matrix` and is never invoked automatically — capture stays screenshot-free
+by default. Use it only when the accessibility tree is insufficient (a
+custom-drawn or canvas UI) or to visually verify a result.
+
+Payload keys (both optional):
+
+- `path` — destination PNG path. When omitted, a temp file is created and its
+  path is returned.
+- `display` — X11 display override (e.g. `":0"`). Defaults to `$DISPLAY`.
+
+The grabber is chosen by display server: on X11, `ffmpeg -f x11grab`, then
+ImageMagick `import -window root`, then `scrot`; on Wayland, `grim`, then
+`spectacle` (best-effort — the compositor may require permission). Dimensions are
+read from the saved PNG header.
+
+Request:
+
+```json
+{"msg_id":"10","operation":"screenshot","payload":{"path":"/tmp/desktop.png"}}
+```
+
+Response:
+
+```json
+{
+  "msg_id": "10",
+  "type": "response",
+  "operation": "screenshot",
+  "payload": {"path": "/tmp/desktop.png", "width": 1920, "height": 1080},
+  "error": null
+}
+```
+
+On a host where no screenshot grabber is installed (or all candidates fail), the
+call returns error `1006` (`UIA_ACCESS_DENIED`) with a `reason` of
+`screenshot_unavailable` rather than crashing:
+
+```json
+{
+  "msg_id": "10",
+  "type": "response",
+  "operation": "screenshot",
+  "payload": null,
+  "error": {
+    "code": 1006,
+    "message": "UIA_ACCESS_DENIED",
+    "details": {
+      "reason": "screenshot_unavailable",
+      "detail": "no screenshot grabber available: install one of ffmpeg, imagemagick (import), scrot (X11), or grim / spectacle (Wayland)."
+    }
+  }
+}
+```
 
 ## Token accounting
 

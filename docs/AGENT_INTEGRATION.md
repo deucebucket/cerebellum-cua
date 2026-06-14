@@ -9,6 +9,36 @@ pixels.
 There are two ways to drive it: as a subprocess over the JSONL stdio protocol, or
 as a Python library via the `CuaEngine` class.
 
+## Hybrid perception: a11y tree by default, screenshot on demand
+
+Perception is hybrid. The accessibility tree is the default path and should be
+preferred for almost everything: it is token-efficient, structured, and directly
+actionable (`build_matrix` → `get_element` / `load_children` → `invoke_action`).
+
+An **optional `screenshot` operation** is available for the cases the tree cannot
+cover well. Reach for it when:
+
+- The target is **custom-drawn / canvas-based** (a game, a chart, an image
+  editor) and `build_matrix` returns a sparse or empty tree, so there is nothing
+  structured to reason over.
+- You need to **visually verify** an action's effect — confirm a dialog actually
+  appeared, that text rendered, or that a layout changed — beyond what the a11y
+  properties report.
+
+Do **not** use it as the primary loop: a screenshot is a single image with no
+structure, far more tokens than the equivalent tree slice, and it performs no
+OCR or analysis (it returns an image file for an external model to inspect). It
+is never taken automatically and is not part of `build_matrix`.
+
+```jsonl
+→ {"msg_id":"10","operation":"screenshot","payload":{"path":"/tmp/desktop.png"}}
+← {"msg_id":"10","type":"response","operation":"screenshot","payload":{"path":"/tmp/desktop.png","width":1920,"height":1080},"error":null}
+```
+
+Omit `path` to have a temp file created and its path returned. On a host with no
+screenshot tool installed the call returns error `1006` with a `reason` of
+`screenshot_unavailable` (see [PROTOCOL.md](PROTOCOL.md)).
+
 ## (a) As a subprocess over JSONL stdio
 
 Launch the engine as a child process and exchange JSONL lines with it. This works
