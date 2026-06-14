@@ -38,8 +38,7 @@ from cerebellum_cua.capture.atspi._convert import convert, read_states
 from cerebellum_cua.capture.atspi._predicate import atspi_should_include
 from cerebellum_cua.capture.atspi._reacquire import (
     matches,
-    reacquire_path,
-    walk_path,
+    reacquire_node,
 )
 from cerebellum_cua.capture.base import (
     ActionNotSupported,
@@ -215,25 +214,23 @@ class AtspiCaptureBackend(CaptureBackend):
     def reacquire(self, identity: dict[str, Any]) -> CapturedElement | None:
         """Re-find an element from its stored identity (after a DB round-trip).
 
-        ``identity`` needs ``atspi_path`` (the root-first child-index chain stored
-        in ``metadata`` at capture) and, optionally, ``role`` / ``name`` for a
-        loose verification. Walks ``Atspi.get_desktop(0)`` down those indices and
-        returns a freshly converted :class:`CapturedElement` (with ``native_ref``
-        set) for the node found there, or ``None`` on any miss or mismatch.
+        ``identity`` needs ``atspi_path`` (the root-first descriptor chain stored
+        in ``metadata`` at capture: per-level ``{i, role, name}`` dicts, or a
+        legacy ``list[int]``) and, optionally, ``role`` / ``name`` for a loose
+        final verification. Walks ``Atspi.get_desktop(0)`` matching each level by
+        role/name (index is only a hint), returning a freshly converted
+        :class:`CapturedElement` (with ``native_ref`` set), or ``None`` on a miss.
 
         Guards against the C-level abort like the rest of the backend: a dead bus,
         missing bindings, or an out-of-range index yields ``None`` rather than a
         crash.
         """
-        path = reacquire_path(identity)
-        if path is None:
-            return None
         try:
             atspi = self._atspi()
         except CaptureNotAvailable:
             return None
         try:
-            node = walk_path(atspi.get_desktop(0), path)
+            node = reacquire_node(atspi.get_desktop(0), identity)
         except Exception:  # noqa: BLE001
             return None
         if node is None:

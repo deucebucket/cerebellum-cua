@@ -160,14 +160,30 @@ def test_invoke_no_native_ref_raises() -> None:
 # reacquire: walks a child-index path on a fake desktop
 # --------------------------------------------------------------------------- #
 class _Node:
-    """Minimal fake accessible for the reacquire tree-walk."""
+    """Minimal fake accessible for the reacquire tree-walk.
+
+    ``index_override`` lets a test force ``get_index_in_parent()`` to a value AT-SPI
+    would report for that node (e.g. ``-1`` for an application/title-bar node), so
+    descriptor capture and the role/name fallback are exercised on the real case.
+    """
 
     def __init__(
-        self, role: str = "panel", name: str = "", children: list[Any] | None = None
+        self,
+        role: str = "panel",
+        name: str = "",
+        children: list[Any] | None = None,
+        index_override: int | None = None,
     ) -> None:
         self._role = role
         self._name = name
         self._children = children or []
+        self._parent: Any = None
+        self._index = index_override if index_override is not None else 0
+        self._index_override = index_override
+        for i, c in enumerate(self._children):
+            c._parent = self
+            if c._index_override is None:
+                c._index = i
 
     def get_child_count(self) -> int:
         return len(self._children)
@@ -199,10 +215,10 @@ class _Node:
         return _E()
 
     def get_index_in_parent(self) -> int:
-        return 0
+        return self._index
 
     def get_parent(self) -> Any:
-        return None
+        return self._parent
 
 
 class _FakeAtspiModule:
@@ -224,7 +240,91 @@ def _backend_with_desktop(desktop: _Node) -> AtspiCaptureBackend:
     return backend
 
 
-def test_reacquire_walks_index_path() -> None:
+def _path_for(node: _Node) -> list[dict[str, Any]]:
+    """The descriptor ``atspi_path`` convert() would store for ``node``."""
+    return list(convert(node).metadata["atspi_path"])
+
+
+def test_reacquire_walks_descriptor_path() -> None:
+    target = _Node(role="push button", name="OK")
+    panel = _Node(role="panel", children=[_Node(role="label"), target])
+    app = _Node(role="frame", name="My App", children=[panel])
+    desktop = _Node(role="desktop frame", children=[app])
+    backend = _backend_with_desktop(desktop)
+
+    # convert() builds the descriptor path; reacquire walks it back to target.
+    found = backend.reacquire({"atspi_path": _path_for(target), "name": "OK"})
+    assert found is not None
+    assert found.name == "OK"
+    assert found.native_ref is target
+
+
+def test_reacquire_handles_mid_path_negative_index() -> None:
+    # The real-world case: AT-SPI reports -1 for the application node's
+    # index_in_parent even though it has the desktop as a parent. The walk must
+    # fall back to matching by role/name instead of trusting the -1 index.
+    target = _Node(role="push button", name="Save")
+    panel = _Node(role="panel", children=[target])
+    # app has index_override=-1 -> its descriptor stores {"i": -1, ...}.
+    app = _Node(role="application", name="gedit", children=[panel], index_override=-1)
+    desktop = _Node(role="desktop frame", children=[app])
+    backend = _backend_with_desktop(desktop)
+
+    path = _path_for(target)
+    assert path[0]["i"] == -1  # the mid-path -1 we are guarding against
+    found = backend.reacquire({"atspi_path": path, "name": "Save"})
+    assert found is not None
+    assert found.native_ref is target
+
+
+def test_reacquire_scans_when_index_hint_wrong() -> None:
+    # Index hint points at the wrong sibling (role differs); the scan must find the
+    # right one by role/name anyway.
+    target = _Node(role="push button", name="OK")
+    other = _Node(role="label", name="OK")
+    app = _Node(role="frame", name="App", children=[other, target])
+    desktop = _Node(role="desktop frame", children=[app])
+    backend = _backend_with_desktop(desktop)
+
+    # Stored descriptor for target has i=1; corrupt it to a stale i=0 (the label).
+    path = _path_for(target)
+    path[-1]["i"] = 0
+    found = backend.reacquire({"atspi_path": path, "name": "OK"})
+    assert found is not None
+    assert found.native_ref is target
+
+
+def test_reacquire_returns_none_on_name_mismatch() -> None:
+    target = _Node(role="push button", name="Cancel")
+    app = _Node(role="frame", name="App", children=[target])
+    desktop = _Node(role="desktop frame", children=[app])
+    backend = _backend_with_desktop(desktop)
+
+    found = backend.reacquire({"atspi_path": _path_for(target), "name": "OK"})
+    assert found is None
+
+
+def test_reacquire_returns_none_when_role_absent() -> None:
+    app = _Node(role="frame", name="App", children=[])
+    desktop = _Node(role="desktop frame", children=[app])
+    backend = _backend_with_desktop(desktop)
+
+    # A descriptor demanding a child that does not exist under the app.
+    path: list[dict[str, Any]] = [
+        {"i": 0, "role": "frame", "name": "App"},
+        {"i": 0, "role": "push button", "name": "Ghost"},
+    ]
+    assert backend.reacquire({"atspi_path": path}) is None
+
+
+def test_reacquire_returns_none_without_path() -> None:
+    backend = _backend_with_desktop(_Node())
+    assert backend.reacquire({}) is None
+    assert backend.reacquire({"atspi_path": []}) is None
+
+
+def test_reacquire_legacy_int_path_still_works() -> None:
+    # Back-compat: old snapshots stored a plain list[int] child-index chain.
     target = _Node(role="push button", name="OK")
     panel = _Node(role="panel", children=[_Node(role="label"), target])
     app = _Node(role="frame", children=[panel])
@@ -234,36 +334,19 @@ def test_reacquire_walks_index_path() -> None:
     # desktop -> app(0) -> panel(0) -> target(1)
     found = backend.reacquire({"atspi_path": [0, 0, 1], "name": "OK"})
     assert found is not None
-    assert found.name == "OK"
     assert found.native_ref is target
 
 
-def test_reacquire_returns_none_on_name_mismatch() -> None:
-    target = _Node(role="push button", name="Cancel")
-    app = _Node(role="frame", children=[target])
-    desktop = _Node(role="desktop frame", children=[app])
-    backend = _backend_with_desktop(desktop)
-
-    found = backend.reacquire({"atspi_path": [0, 0], "name": "OK"})
-    assert found is None
-
-
-def test_reacquire_returns_none_on_out_of_range_path() -> None:
-    app = _Node(role="frame", children=[])
-    desktop = _Node(role="desktop frame", children=[app])
-    backend = _backend_with_desktop(desktop)
-
-    found = backend.reacquire({"atspi_path": [0, 5]})
-    assert found is None
-
-
-def test_reacquire_returns_none_without_path() -> None:
-    backend = _backend_with_desktop(_Node())
-    assert backend.reacquire({}) is None
-    assert backend.reacquire({"atspi_path": []}) is None
-
-
-def test_convert_stores_atspi_path_in_metadata() -> None:
-    leaf = _Node(role="label", name="x")
-    el = convert(leaf)
-    assert el.metadata["atspi_path"] == el.runtime_id
+def test_convert_stores_descriptor_path_in_metadata() -> None:
+    target = _Node(role="label", name="x")
+    panel = _Node(role="panel", children=[target])
+    app = _Node(role="application", name="gedit", children=[panel])
+    _Node(role="desktop frame", children=[app])  # wire the chain to the desktop
+    el = convert(target)
+    path = el.metadata["atspi_path"]
+    # Root-first, desktop excluded: application -> panel -> label.
+    assert [d["role"] for d in path] == ["application", "panel", "label"]
+    assert path[-1]["name"] == "x"
+    assert el.metadata["atspi_app"] == "gedit"
+    # runtime_id stays the plain int index chain (desktop-inclusive), unchanged.
+    assert el.runtime_id == [0, 0, 0, 0]
