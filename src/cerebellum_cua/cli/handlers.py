@@ -47,6 +47,10 @@ class OperationHandlers:
 
     def as_dict(self) -> dict[str, Handler]:
         """Return the operation -> handler mapping the protocol dispatches against."""
+        from cerebellum_cua.cli.representation import (  # noqa: PLC0415 - avoid cycle
+            representation_ops,
+        )
+
         return {
             "build_matrix": self.build_matrix,
             "get_element": self.get_element,
@@ -57,6 +61,7 @@ class OperationHandlers:
             "read_text": self.read_text,
             "run_skill": self.run_skill,
             "list_windows": self.list_windows,
+            **representation_ops(self),
         }
 
     # --- build_matrix ----------------------------------------------------
