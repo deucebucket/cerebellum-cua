@@ -87,7 +87,7 @@ to capture must actually expose accessibility trees.
 #### One-time privileged setup (SELinux fix + scoped sudoers)
 
 On SELinux-enforcing immutable distributions (for example Fedora Silverblue,
-Bazzite, and Kinoite), the AT-SPI registry is blocked under Enforcing and the
+immutable Fedora variants (Silverblue, Kinoite, etc.)), the AT-SPI registry is blocked under Enforcing and the
 bus probe fails, so the AT-SPI backend reports itself unavailable. Rather than
 have the agent fight `sudo` prompts at runtime, run the one-time setup script
 **once, as a human, with sudo**:
