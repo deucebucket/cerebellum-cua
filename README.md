@@ -124,6 +124,29 @@ The five operations (`build_matrix`, `get_element`, `load_children`,
 Playwright is driven by agents) is covered in
 [docs/AGENT_INTEGRATION.md](docs/AGENT_INTEGRATION.md).
 
+## Execution modes
+
+The CLI takes a `--mode` flag that selects defaults for which capture backend to
+use and whether actions move a visible cursor:
+
+- `desktop` (default) — attach to the real, logged-in session. Auto-selects the
+  capture backend (UIA on Windows, AT-SPI on Linux) and moves a visible cursor so
+  the automation looks user-operated. Requires the host accessibility enablement
+  described in [docs/INSTALL.md](docs/INSTALL.md).
+- `vm` — run inside / against the isolated virtual session brought up by
+  [`scripts/run-vm.sh`](scripts/run-vm.sh) (Xvfb + openbox + the AT-SPI bus).
+  Forces the AT-SPI backend and keeps the visible cursor on, so a viewer (e.g.
+  VNC) attached to the virtual display shows realistic motion.
+- `background` — the same isolated session, unattended: no viewer and no visible
+  cursor (headless).
+
+```bash
+python -m cerebellum_cua.cli --db-dsn ./state.db --secret "$SECRET" --mode vm
+```
+
+Modes, the rig, and how to build/run/record the isolated session are documented
+in [docs/MODES.md](docs/MODES.md).
+
 ## How it works
 
 ```

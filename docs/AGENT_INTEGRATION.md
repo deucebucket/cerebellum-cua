@@ -204,6 +204,11 @@ Arguments:
   Use the same secret across processes that share a snapshot.
 - `--max-depth` (optional) — default traversal depth.
 - `--target-exe` / `--target-title` (optional) — default capture target regexes.
+- `--mode` (optional) — execution mode: `desktop` (default; real session, auto
+  backend, visible cursor), `vm` (isolated virtual session via
+  `scripts/run-vm.sh`, AT-SPI backend, visible cursor for a viewer), or
+  `background` (same isolated session, headless, no visible cursor). See
+  [MODES.md](MODES.md).
 
 The engine writes one `engine_ready` event, then reads one JSON request per line
 from stdin and writes one JSON response per line to stdout. See
