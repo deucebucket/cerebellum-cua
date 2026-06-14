@@ -159,6 +159,10 @@ use and whether actions move a visible cursor:
 python -m cerebellum_cua.cli --db-dsn ./state.db --secret "$SECRET" --mode vm
 ```
 
+To watch a `vm` session live in a browser or VNC client, `scripts/stream-vm.sh`
+serves the isolated display over localhost-bound noVNC/VNC (see the streaming
+section of [docs/MODES.md](docs/MODES.md)).
+
 Modes, the rig, and how to build/run/record the isolated session are documented
 in [docs/MODES.md](docs/MODES.md).
 

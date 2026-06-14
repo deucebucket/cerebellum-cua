@@ -11,9 +11,16 @@
 #   OUT             directory for artifacts                  (default: /rig/out)
 #   SCREEN_SIZE     Xvfb geometry WxHxDepth                  (default: 1280x800x24)
 #   APP_WARMUP      seconds to wait after launching APP      (default: 4)
+#   STREAM          set to 1 to live-stream instead of record (default: unset)
+#   VNC_PORT        x11vnc RFB port (STREAM only)            (default: 5900)
+#   NOVNC_PORT      noVNC web port  (STREAM only)            (default: 6080)
 #
 # Artifacts written to $OUT: xvfb.log, openbox.log, atspi.log, the app log,
 # ffmpeg.log, before.png, after.png, demo.mp4, and (if a demo ran) demo.log.
+#
+# When STREAM=1 the record-and-exit path is replaced by a live stream: after the
+# session and app are up, x11vnc + noVNC serve the display and the container
+# stays running so the agent can be driven while watched. See rig/stream.sh.
 set -u
 
 APP="${APP:-gedit}"
@@ -49,6 +56,17 @@ echo "session bus + openbox + a11y bus up"
 "$APP" >"$OUT/app.log" 2>&1 &
 sleep "$APP_WARMUP"
 echo "launched app: $APP"
+
+# 3a. STREAM path: serve the live display for watching and keep running.
+# When STREAM is unset, fall through to the record-and-exit path below.
+if [ "${STREAM:-0}" = "1" ]; then
+  STREAM_SH="$(dirname "${BASH_SOURCE[0]}")/stream.sh"
+  [ -f "$STREAM_SH" ] || STREAM_SH=/rig/stream.sh
+  # shellcheck source=/dev/null
+  . "$STREAM_SH"
+  start_stream
+  exit $?
+fi
 
 # 4. record the desktop while the demo runs
 ffmpeg -y -f x11grab -video_size "$VIDEO_SIZE" -framerate 12 -i "$DISPLAY_NUM" \
