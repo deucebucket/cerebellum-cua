@@ -1,0 +1,29 @@
+{
+  "title": "gedit basics",
+  "steps": [
+    {
+      "caption": "cerebellum-cua driving a real app, via the accessibility tree",
+      "action": "pause",
+      "name": "",
+      "args": {},
+      "hold": 2.5
+    },
+    {
+      "caption": "Type into the document",
+      "action": "skill",
+      "name": "type_into",
+      "args": {
+        "value": "Hello from a captioned tutorial.",
+        "role": "EDIT"
+      },
+      "hold": 3.0
+    },
+    {
+      "caption": "It can read the screen too",
+      "action": "op",
+      "name": "screenshot",
+      "args": {},
+      "hold": 2.5
+    }
+  ]
+}
