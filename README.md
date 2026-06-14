@@ -85,6 +85,21 @@ unavailable.
 
 ## Install
 
+Once published, from PyPI:
+
+```bash
+pip install cerebellum-cua                 # core (SQLite backend, JSONL CLI)
+pip install 'cerebellum-cua[postgres]'     # + PostgreSQL backend
+pip install 'cerebellum-cua[uia]'          # Windows only: live UIA capture
+pip install 'cerebellum-cua[vision]'       # screenshot-based capture (also needs system tesseract-ocr)
+pip install 'cerebellum-cua[mcp]'          # MCP server wrapper
+```
+
+> **Not yet on PyPI.** The PyPI listing lands with the first tagged release;
+> until then, install from source (below).
+
+From source (editable, e.g. to develop or to run before the first release):
+
 ```bash
 pip install -e .                 # core (SQLite backend, JSONL CLI)
 pip install -e '.[postgres]'     # + PostgreSQL backend
@@ -93,7 +108,7 @@ pip install -e '.[vision]'       # screenshot-based capture (also needs system t
 pip install -e '.[dev]'          # tests + lint
 ```
 
-Not yet published to PyPI; install from source. Per-OS setup and how to enable
+Per-OS setup and how to enable
 live capture (including the Linux a11y bus and SELinux notes) are in
 [docs/INSTALL.md](docs/INSTALL.md). Check which backends are usable on your host:
 

@@ -8,9 +8,36 @@ version = "0.1.0"
 description = "Captures the OS accessibility tree (Windows UIA / Linux AT-SPI) into a versioned relational matrix and serves it to agents over a token-bounded JSONL protocol, without screenshots."
 requires-python = ">=3.10"
 readme = "README.md"
+license = { file = "LICENSE" }
+keywords = [
+    "accessibility",
+    "computer-use",
+    "agent",
+    "automation",
+    "uia",
+    "at-spi",
+    "a11y",
+    "rpa",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Operating System :: OS Independent",
+    "Intended Audience :: Developers",
+    "Topic :: Software Development :: Libraries",
+]
 dependencies = [
     "PyJWT>=2.8",
 ]
+
+[project.urls]
+Homepage = "https://github.com/deucebucket/cerebellum-cua"
+Repository = "https://github.com/deucebucket/cerebellum-cua"
+Issues = "https://github.com/deucebucket/cerebellum-cua/issues"
 
 [project.optional-dependencies]
 # Windows-only live UIA capture. Not installable/testable on Linux.
@@ -46,6 +73,9 @@ cerebellum-cua-mcp = "cerebellum_cua.mcp.__main__:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+"cerebellum_cua.storage.schema" = ["*.sql"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
