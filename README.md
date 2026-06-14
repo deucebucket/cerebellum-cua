@@ -145,10 +145,11 @@ on stdin and writes one JSON response per line on stdout:
 {"type":"response","operation":"build_matrix","payload":{"snapshot_id":1,"epoch":1,"total_elements":184,"root_elements":[0],"status":"success"},"error":null}
 ```
 
-The five operations (`build_matrix`, `get_element`, `load_children`,
-`invoke_action`, `get_snapshot_diff`) are specified in
-[docs/PROTOCOL.md](docs/PROTOCOL.md). Using it as a tool inside an agent (the way
-Playwright is driven by agents) is covered in
+The core operations (`build_matrix`, `get_element`, `load_children`,
+`invoke_action`, `get_snapshot_diff`) plus the rest (`screenshot`, `read_text`,
+`read_legend`, `annotate`, `wireframe`, `list_windows`, `run_skill`, `elevate`)
+are specified in [docs/PROTOCOL.md](docs/PROTOCOL.md). Using it as a tool inside an
+agent (the way Playwright is driven by agents) is covered in
 [docs/AGENT_INTEGRATION.md](docs/AGENT_INTEGRATION.md).
 
 ## Execution modes
