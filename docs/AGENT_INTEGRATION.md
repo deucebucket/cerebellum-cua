@@ -104,6 +104,49 @@ Because `read_text` returns text plus coordinates only, it stays far below the
 token cost of a screenshot while remaining directly actionable: feed a `bbox`
 center to `invoke_action`'s `click_point` to act on what you read.
 
+## Cheap labeling with a cipher legend: read_legend
+
+When you do show element labels to the model, repeating full names every turn is
+wasteful. `read_legend` assigns one short code per *distinct concept* in a
+snapshot (an element's top semantic concept, else its control type) and returns a
+one-time `code -> meaning` legend. The agent reads the legend once, then refers to
+elements by cheap codes (`b0`, `e1`, …); the leading letter is a family hint
+(`b` button, `e` edit, `m` menu item, `w` window, `l` link, `c` other).
+
+```text
+→ {"msg_id":"3","operation":"read_legend","payload":{}}
+← {"msg_id":"3","type":"response","operation":"read_legend","payload":{"legend":{"w0":"window","b0":"action_button","b1":"cancel_button"},"elements":[{"row_id":0,"code":"w0"},{"row_id":1,"code":"b0"},{"row_id":2,"code":"b1"}],"count":3},"error":null}
+```
+
+The legend is regenerated fresh on every call — it is a per-scan shorthand, not a
+persistent position cache, and nothing is stored or aliased across calls. Default
+target is the latest snapshot; pass `snapshot_id` for a specific one.
+
+## Visual grounding and docs: annotate and wireframe
+
+Two views render the structured matrix back into something visual, without a live
+loop:
+
+- `annotate` draws a **set-of-marks** overlay — each element's bounding box plus a
+  short label (the `read_legend` code when available, else the `row_id`) — onto a
+  screenshot and saves it. This is useful for grounding (a vision-capable model
+  sees marked, numbered targets it can refer to) and for documentation/debugging.
+  It grabs a fresh screenshot by default, or annotates a `path` you supply; the
+  result is `{"path","width","height","count"}`. Drawing needs OpenCV (the
+  `[vision]` extra); without it the call returns code `1006` with reason
+  `annotate_unavailable` rather than crashing.
+
+- `wireframe` returns a compact ASCII layout map of a snapshot (bordered boxes
+  with truncated labels on a character grid) — a glanceable, text-only structure
+  view that costs no image bytes.
+
+```text
+→ {"msg_id":"4","operation":"annotate","payload":{"out_path":"/tmp/marked.png"}}
+← {"msg_id":"4","type":"response","operation":"annotate","payload":{"path":"/tmp/marked.png","width":1920,"height":1080,"count":3},"error":null}
+→ {"msg_id":"5","operation":"wireframe","payload":{}}
+← {"msg_id":"5","type":"response","operation":"wireframe","payload":{"text":"+----...----+\n|Main Window|\n..."},"error":null}
+```
+
 ## Full control surface: click, drag, scroll, type, key
 
 `invoke_action` covers the complete set of pointer/keyboard primitives an agent

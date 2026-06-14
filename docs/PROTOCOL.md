@@ -50,11 +50,13 @@ The error object is:
 ## Operations
 
 There are five core operations: `build_matrix`, `get_element`, `load_children`,
-`invoke_action`, `get_snapshot_diff`, plus four extensions: `screenshot` (opt-in
+`invoke_action`, `get_snapshot_diff`, plus seven extensions: `screenshot` (opt-in
 on-demand visual capture), `read_text` (aggregate on-screen text + coords),
-`run_skill` (resolve a target by query, then act on it), and `list_windows`
-(authoritative desktop/window state from the WM). An unknown operation
-returns code `9999`.
+`run_skill` (resolve a target by query, then act on it), `list_windows`
+(authoritative desktop/window state from the WM), `read_legend` (a compact code
+legend — token-saving shorthand for a snapshot's elements), `annotate` (a
+set-of-marks overlay drawn onto a screenshot), and `wireframe` (an ASCII layout
+map of a snapshot). An unknown operation returns code `9999`.
 
 ### build_matrix
 
@@ -707,6 +709,116 @@ implemented — KWin exposes no stable window-list method over plain D-Bus, so a
 full list needs a loaded KWin script; until that ships the KWin backend returns
 `[]` rather than fabricate data. wlroots is note-only (its toplevel-management
 protocol has no CLI client). Both return an empty list, never invented windows.
+
+### read_legend
+
+Builds a compact code legend for a snapshot's elements — a token-saving
+shorthand. Instead of repeating full labels for every element, each *distinct
+concept* (an element's top semantic `domain_concept` when present, else its
+`ControlType` name lowercased) is assigned one short code, plus a one-time
+`code -> meaning` legend the agent reads once. Codes are grouped by a single-letter
+family: `button -> b`, `edit`/`text_input -> e`, `menu_item -> m`, `window -> w`,
+`link -> l`, everything else `-> c` (e.g. `b0`, `b1`, `e0`). Ordering is
+deterministic (by `row_id`).
+
+This is **not** a persistent position cache: the legend is a pure function of one
+snapshot's elements and is regenerated fresh on every call. Nothing is stored or
+aliased across calls. (Pinned, persistent aliases are a possible future
+extension and intentionally out of scope.)
+
+Payload: `{snapshot_id?: int}` (default: latest persisted snapshot).
+
+```json
+{"msg_id":"16","operation":"read_legend","payload":{}}
+```
+
+```json
+{
+  "msg_id": "16",
+  "type": "response",
+  "operation": "read_legend",
+  "payload": {
+    "legend": {"w0": "window", "b0": "action_button", "b1": "cancel_button"},
+    "elements": [
+      {"row_id": 0, "code": "w0"},
+      {"row_id": 1, "code": "b0"},
+      {"row_id": 2, "code": "b1"}
+    ],
+    "count": 3
+  },
+  "error": null
+}
+```
+
+### annotate
+
+Draws a set-of-marks overlay: each of the snapshot's element bounding boxes is
+drawn as a rectangle with a short label onto a screenshot, saved to a file. The
+label is the element's `read_legend` code when available, else its `row_id`. By
+default a fresh screenshot is grabbed (reusing the `screenshot` grabber); a
+pre-existing image can be supplied via `path`. Rectangle drawing uses OpenCV
+(`cv2`, the `[vision]` extra), imported lazily.
+
+Payload: `{snapshot_id?: int, path?: str, out_path?: str, display?: str}` —
+`path` is a source image (default: grab one), `out_path` is the destination
+(default: a temp PNG), `display` overrides the X11 display when grabbing.
+
+```json
+{"msg_id":"17","operation":"annotate","payload":{"out_path":"/tmp/marked.png"}}
+```
+
+```json
+{
+  "msg_id": "17",
+  "type": "response",
+  "operation": "annotate",
+  "payload": {"path": "/tmp/marked.png", "width": 1920, "height": 1080, "count": 3},
+  "error": null
+}
+```
+
+On a host where no screenshot grabber is installed, or OpenCV is unavailable, the
+call raises code `1006` (`UIA_ACCESS_DENIED`) with `reason`
+`annotate_unavailable` rather than crashing:
+
+```json
+{
+  "msg_id": "17",
+  "type": "response",
+  "operation": "annotate",
+  "payload": null,
+  "error": {
+    "code": 1006,
+    "message": "UIA_ACCESS_DENIED",
+    "details": {
+      "reason": "annotate_unavailable",
+      "detail": "OpenCV (cv2) is required to draw annotations; install the '[vision]' extra (pip install opencv-python-headless)."
+    }
+  }
+}
+```
+
+### wireframe
+
+Renders a snapshot's elements as a compact ASCII layout map — a glanceable text
+wireframe (bordered boxes with truncated labels on a fixed character grid), built
+from stored elements with no live capture.
+
+Payload: `{snapshot_id?: int}` (default: latest persisted snapshot).
+
+```json
+{"msg_id":"18","operation":"wireframe","payload":{}}
+```
+
+```json
+{
+  "msg_id": "18",
+  "type": "response",
+  "operation": "wireframe",
+  "payload": {"text": "+------------------+\n|Main Window       |\n| +-----+          |\n| |Save |          |\n| +-----+          |\n+------------------+"},
+  "error": null
+}
+```
 
 ## Token accounting
 

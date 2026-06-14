@@ -29,7 +29,10 @@ from cerebellum_cua.errors import MatrixUIError
 #: contract; ``screenshot`` is an opt-in on-demand visual-capture extension,
 #: ``read_text`` aggregates on-screen text + coords from a stored snapshot,
 #: ``run_skill`` runs a named high-level skill (resolve + act + optional verify),
-#: and ``list_windows`` reads authoritative desktop window state from the WM.
+#: ``list_windows`` reads authoritative desktop window state from the WM,
+#: ``read_legend`` emits a compact code legend (token-saving shorthand) for a
+#: snapshot, ``annotate`` overlays set-of-marks element boxes onto a screenshot,
+#: and ``wireframe`` renders an ASCII layout map of a snapshot.
 OPERATIONS = (
     "build_matrix",
     "get_element",
@@ -40,6 +43,9 @@ OPERATIONS = (
     "read_text",
     "run_skill",
     "list_windows",
+    "read_legend",
+    "annotate",
+    "wireframe",
 )
 
 UNKNOWN_OPERATION_CODE = 9999

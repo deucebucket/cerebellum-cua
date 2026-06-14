@@ -396,6 +396,9 @@ def test_handlers_dict_exposes_operations(engine: CuaEngine) -> None:
         "read_text",
         "run_skill",
         "list_windows",
+        "read_legend",
+        "annotate",
+        "wireframe",
     }
 
 
