@@ -3,6 +3,43 @@
 Chronological, factual notes on how the project is being built and the decisions
 behind it. Newest entries first.
 
+## 2026-06-14 — capabilities, hybrid perception, and platform validation
+
+**Action + verification.** Added real control on top of capture: AT-SPI/UIA
+invoke/set_text/toggle/select/set_value/expand, coordinate click/type/key/drag/
+scroll, element re-acquisition after a DB round-trip, human-visible cursor motion,
+a user-takeover kill-switch (evdev), and an opt-in act→re-capture→diff verification
+loop. A skills layer (`run_skill`) composes resolve→act→verify into named commands.
+
+**Hybrid perception, one seam.** Kept the accessibility tree as the token-cheap
+default and added: an opt-in `screenshot` op; a `vision` capture backend
+(screenshot → structured elements via OCR + OpenCV) behind the same
+`CaptureBackend` interface as `uia`/`atspi`; full on-screen text into coordinates
+(`read_text` + AT-SPI Text buffer); an authoritative window-state source
+(`list_windows`); a compact cipher legend and annotated/wireframe composites.
+Decision: structured representations (a11y/OCR/window-state) are token-cheap and
+the workhorse; raw pixels only via the explicit `screenshot` op; an adjacent media
+pipeline handles video via metadata/motion/cut-lists, never frame-by-frame.
+
+**Execution modes + observability.** `--mode {desktop,vm,background}`, an in-repo
+container VM rig (`rig/`, `scripts/`) for reproducible isolated runs and recording,
+live VNC/noVNC streaming, and tutorial generation with on-screen captions.
+
+**Productization.** Token benchmarks with real numbers (initial context stays flat
+~91 tokens from 10→5000 elements), one-time Linux setup (SELinux fix + scoped
+sudoers so automation never stalls), cross-platform elevation (polkit/sudo/UAC,
+secret from `.env`), and PyPI packaging (SQL schema shipped in the wheel) + a
+trusted-publishing release workflow.
+
+**Platform validation.** Linux/AT-SPI proven end-to-end (captured a real desktop
+and drove gedit via a skill). **Windows/UIA validated on real Windows 11**: this
+surfaced that the UIA layer had been written against raw IUIAutomation COM names
+absent from the `uiautomation` library — it connected but crashed on the first tree
+walk. Ported all six uia modules to the real API and re-validated live: it captured
+the interactive desktop (184 elements, correct control-type mapping). The unit-test
+mocks had mirrored the wrong API and were rewritten to the real `Control` surface —
+a reminder that mocked tests only verify against the shape you give them.
+
 ## 2026-06-13 — v0.1.0 scaffold
 
 **Goal.** A capture/serving layer that turns the OS accessibility tree into a
