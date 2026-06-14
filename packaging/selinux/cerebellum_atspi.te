@@ -1,0 +1,60 @@
+## cerebellum_atspi — candidate SELinux policy module (FALLBACK REFERENCE).
+##
+## PREFER audit2allow ON YOUR OWN MACHINE.
+## ------------------------------------------------------------------------
+## The denials the AT-SPI registry hits are host- and version-specific. The
+## correct, minimal policy is the one generated from the denials your kernel
+## actually logged. scripts/setup-linux.sh does this FIRST:
+##
+##     ausearch -m avc -ts recent | grep -i atspi \
+##         | audit2allow -M cerebellum_atspi
+##     semodule -i cerebellum_atspi.pp
+##
+## This hand-written .te is only a fallback/reference for when ausearch finds
+## no recent denials (e.g. the bus has not been exercised yet) and you want a
+## starting point. Review every rule before installing it; do not ship rules
+## you do not understand. Compile + install with:
+##
+##     checkmodule -M -m -o cerebellum_atspi.mod cerebellum_atspi.te
+##     semodule_package -o cerebellum_atspi.pp -m cerebellum_atspi.mod
+##     semodule -i cerebellum_atspi.pp
+##
+## NOTE: the type name gnome_atspi_t and the interfaces below come from the
+## refpolicy gnome module shipped on Fedora/RHEL-family systems. On a distro
+## that labels the registry differently, this module will not compile as-is.
+
+policy_module(cerebellum_atspi, 1.0.0)
+
+########################################
+#
+# Declarations
+#
+
+require {
+    type gnome_atspi_t;
+    type proc_t;
+    class file { read open getattr };
+    class dir { search getattr };
+    class security { compute_av compute_create };
+    class system { syslog_console };
+}
+
+########################################
+#
+# Observed denials addressed
+#
+# The AT-SPI registry, running in gnome_atspi_t, was denied:
+#   * reading /proc/<pid>/cmdline of peer processes (client identification),
+#   * SELinux access-vector / security computations on the avc cache, and
+#   * sending to the journal/console for its diagnostics.
+# These rules permit exactly those operations and nothing broader.
+
+# Read peer /proc/<pid>/cmdline (AT-SPI identifies the connecting client).
+allow gnome_atspi_t proc_t:dir { search getattr };
+allow gnome_atspi_t proc_t:file { read open getattr };
+
+# SELinux userspace AVC computations performed by the registry/libatspi.
+allow gnome_atspi_t self:security { compute_av compute_create };
+
+# Allow the registry to write diagnostics to the system log / console.
+allow gnome_atspi_t self:system syslog_console;
