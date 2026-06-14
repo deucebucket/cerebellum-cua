@@ -56,6 +56,7 @@ class OperationHandlers:
             "screenshot": self.screenshot,
             "read_text": self.read_text,
             "run_skill": self.run_skill,
+            "list_windows": self.list_windows,
         }
 
     # --- build_matrix ----------------------------------------------------
@@ -215,6 +216,28 @@ class OperationHandlers:
             raise UIAAccessDeniedError(
                 reason="screenshot_unavailable", detail=str(exc)
             ) from exc
+
+    # --- list_windows (authoritative desktop window state) --------------
+    def list_windows(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """List top-level windows straight from the WM/compositor.
+
+        The cheap, authoritative desktop layer (which windows exist, which is
+        active, geometry/state/workspace) — read from the WM, not inferred from
+        the a11y tree. Optional ``backend`` forces ``x11``/``kwin``/``wlroots``;
+        default ``auto`` picks by display server. Returns ``{"windows": [...],
+        "backend": str|null, "count": int}`` — an empty list (``backend`` null)
+        on a host with no usable backend rather than an error.
+        """
+        from cerebellum_cua.desktop import windows as wmod  # noqa: PLC0415 - lazy
+
+        backend = str(payload.get("backend") or "auto")
+        windows = wmod.list_windows(backend)
+        used = wmod.available(backend) if windows or backend == "auto" else backend
+        return {
+            "windows": [w.to_dict() for w in windows],
+            "backend": used,
+            "count": len(windows),
+        }
 
     # --- read_text (aggregate on-screen text + coords) ------------------
     def read_text(self, payload: dict[str, Any]) -> dict[str, Any]:

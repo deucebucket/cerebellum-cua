@@ -50,9 +50,10 @@ The error object is:
 ## Operations
 
 There are five core operations: `build_matrix`, `get_element`, `load_children`,
-`invoke_action`, `get_snapshot_diff`, plus three extensions: `screenshot` (opt-in
-on-demand visual capture), `read_text` (aggregate on-screen text + coords), and
-`run_skill` (resolve a target by query, then act on it). An unknown operation
+`invoke_action`, `get_snapshot_diff`, plus four extensions: `screenshot` (opt-in
+on-demand visual capture), `read_text` (aggregate on-screen text + coords),
+`run_skill` (resolve a target by query, then act on it), and `list_windows`
+(authoritative desktop/window state from the WM). An unknown operation
 returns code `9999`.
 
 ### build_matrix
@@ -627,6 +628,85 @@ An unknown skill name returns `{"success": false, "reason": "unknown_skill"}` in
 the payload. When verification is enabled (engine `verify_actions`, or `"verify":
 true` inside `args`) the result also carries `verified` / `effect` /
 `observed_change`, exactly as `invoke_action` does.
+
+### list_windows
+
+Lists top-level windows as the window manager / compositor reports them — which
+windows exist, which is active, their geometry, state and workspace. This is the
+authoritative, cheap desktop-layout view: it reads from the WM (not the a11y
+tree). A common flow is to call `list_windows` first to see the whole desktop,
+then `build_matrix` to drill into one window.
+
+Payload key (optional):
+
+- `backend` — force `"x11"`, `"kwin"`, or `"wlroots"`. Defaults to `"auto"`
+  (selected by display server).
+
+The response is `{"windows": [...], "backend": str|null, "count": int}`. Each
+window object has:
+
+- `id` — window id (X11: `0x`-prefixed hex).
+- `title` — window title.
+- `app` — application name (empty when the backend does not report one).
+- `pid` — owning process id, or `null`.
+- `bounds` — `{left, top, width, height, dpi}` in screen pixels.
+- `active` — whether this is the focused window.
+- `state` — a subset of `maximized` / `minimized` / `fullscreen` / `shaded`.
+- `workspace` — 0-based desktop index, or `null` (sticky / all desktops / unknown).
+
+Request:
+
+```json
+{"msg_id":"15","operation":"list_windows","payload":{}}
+```
+
+Response:
+
+```json
+{
+  "msg_id": "15",
+  "type": "response",
+  "operation": "list_windows",
+  "payload": {
+    "backend": "x11",
+    "count": 1,
+    "windows": [
+      {
+        "id": "0x03600007",
+        "title": "Firefox",
+        "app": "",
+        "pid": 12345,
+        "bounds": {"left": 100, "top": 200, "width": 800, "height": 600, "dpi": 96},
+        "active": true,
+        "state": ["maximized"],
+        "workspace": 0
+      }
+    ]
+  },
+  "error": null
+}
+```
+
+`list_windows` does not error when no window source is available — on a host with
+no usable backend (e.g. a Wayland/KWin or wlroots session, or X11 with neither
+`wmctrl` nor `xdotool` installed) it returns an empty list rather than an error
+envelope:
+
+```json
+{
+  "msg_id": "15",
+  "type": "response",
+  "operation": "list_windows",
+  "payload": {"windows": [], "backend": null, "count": 0},
+  "error": null
+}
+```
+
+Backend honesty: X11 is fully supported. KWin (Wayland) window enumeration is not
+implemented — KWin exposes no stable window-list method over plain D-Bus, so a
+full list needs a loaded KWin script; until that ships the KWin backend returns
+`[]` rather than fabricate data. wlroots is note-only (its toplevel-management
+protocol has no CLI client). Both return an empty list, never invented windows.
 
 ## Token accounting
 
