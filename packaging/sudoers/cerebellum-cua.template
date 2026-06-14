@@ -1,0 +1,45 @@
+# cerebellum-cua scoped sudoers drop-in (TEMPLATE).
+#
+# Installed by scripts/setup-linux.sh to /etc/sudoers.d/cerebellum-cua with
+# mode 0440, after substituting __USER__ with the invoking user and validating
+# the result with `visudo -cf`.
+#
+# WHY THIS EXISTS
+# ---------------
+# An automated agent must NEVER stall waiting for an interactive sudo password.
+# Rather than grant blanket sudo, this drop-in grants NOPASSWD for an
+# intentionally tiny, EXACT allow-list of commands needed to (re)establish the
+# accessibility environment. Everything else still requires a normal password.
+#
+# SECURITY SCOPE — read before editing
+# ------------------------------------
+# * Each entry pins the FULL command path AND its fixed arguments. sudoers
+#   matches the literal command line, so e.g. `setenforce` with no further
+#   restriction here is limited to the exact `setenforce` invocations the agent
+#   issues; if you want to harden further, pin the argument too (see notes).
+# * NO wildcards over arguments beyond the one controlled glob on the policy
+#   module directory (/etc/cerebellum/*.pp), which is root-owned and only the
+#   setup script writes to it.
+# * This is NOT `__USER__ ALL=(ALL) NOPASSWD: ALL`. Do not widen it.
+#
+# PATHS
+# -----
+# Paths below assume a Fedora/RHEL-family layout where SELinux tools live in
+# /usr/sbin. Confirm on the target host with:
+#     command -v setenforce semanage semodule
+# If they resolve elsewhere (e.g. /sbin), adjust the absolute paths here; the
+# setup script prints the resolved paths during `--check`.
+
+# Allow toggling SELinux enforcement mode without a password. The agent uses
+# this only as a transient escape hatch; global Enforcing is kept by setup.
+__USER__ ALL=(root) NOPASSWD: /usr/sbin/setenforce
+
+# Allow marking ONLY the a11y domain (gnome_atspi_t) permissive. This is the
+# fallback a11y fix when no policy module can be built; it is targeted and
+# persistent and does not weaken the rest of the system.
+__USER__ ALL=(root) NOPASSWD: /usr/sbin/semanage permissive -a gnome_atspi_t
+
+# Allow installing a compiled SELinux policy module from the cerebellum policy
+# directory only. /etc/cerebellum is root-owned; the setup script is the only
+# writer, so the glob cannot be abused to load an attacker-supplied module.
+__USER__ ALL=(root) NOPASSWD: /usr/sbin/semodule -i /etc/cerebellum/*.pp

@@ -84,23 +84,72 @@ to capture must actually expose accessibility trees.
    custom-drawn or legacy UIs), expose empty or near-empty trees. **An app with
    an empty tree yields an empty capture — there is no pixel fallback.**
 
-#### Honest note for SELinux-enforcing immutable distributions
+#### One-time privileged setup (SELinux fix + scoped sudoers)
 
 On SELinux-enforcing immutable distributions (for example Fedora Silverblue,
-Bazzite, and Kinoite), D-Bus activation of `at-spi2-registryd` may be denied. You
-will see errors such as `Permission denied` with an SELinux denial referencing
-the `gnome_atspi_exec_t` label. In that situation the bus probe fails and the
-AT-SPI backend reports itself unavailable. Working around this generally requires
-one of:
+Bazzite, and Kinoite), the AT-SPI registry is blocked under Enforcing and the
+bus probe fails, so the AT-SPI backend reports itself unavailable. Rather than
+have the agent fight `sudo` prompts at runtime, run the one-time setup script
+**once, as a human, with sudo**:
 
-- adding an SELinux policy allowance for the registry daemon to be D-Bus
-  activated, or
-- running the AT-SPI bus launcher and registry daemon yourself as a user service
-  rather than relying on D-Bus activation.
+```bash
+sudo bash scripts/setup-linux.sh            # apply (idempotent)
+sudo bash scripts/setup-linux.sh --check    # report status, change nothing
+sudo bash scripts/setup-linux.sh --uninstall # remove what it installed
+```
 
-This is an environment configuration issue outside the package; `cerebellum-cua`
-cannot grant itself the access. As above, applications only expose trees if they
-were started after the bus came up.
+What it installs:
+
+- **SELinux a11y fix.** It first tries to build a minimal policy module from
+  this host's own recent denials (`ausearch … | audit2allow -M cerebellum_atspi`,
+  then `semodule -i`). If there are no recent denials to build from, it falls
+  back to making *only* the a11y domain permissive
+  (`semanage permissive -a gnome_atspi_t`). **Global SELinux stays Enforcing**
+  either way. A hand-written fallback module source lives at
+  `packaging/selinux/cerebellum_atspi.te`, but audit2allow on your own machine
+  is preferred (and is what the script does first).
+- **Scoped sudoers drop-in** at `/etc/sudoers.d/cerebellum-cua` (mode 0440,
+  validated with `visudo -cf`), rendered from
+  `packaging/sudoers/cerebellum-cua.template`. It grants the invoking user
+  passwordless sudo for an **exact, tiny allow-list only** — `setenforce`,
+  `semanage permissive -a gnome_atspi_t`, and `semodule -i /etc/cerebellum/*.pp`
+  — **not** blanket sudo. With this in place an automated agent never stalls on
+  an interactive sudo prompt for the accessibility fix.
+
+Because this host is **KDE on Wayland**, the GNOME `toolkit-accessibility`
+gsettings key does not apply to Qt/KDE apps. The script sets that key only if the
+GNOME schema is present, and always prints desktop-agnostic guidance: install
+`at-spi2-core`, export `QT_ACCESSIBILITY=1` for Qt apps, confirm the bus with the
+`gdbus` probe above, and start apps only after the bus is up.
+
+This is an environment configuration step outside the package import itself;
+`cerebellum-cua` cannot grant itself the access. As above, applications only
+expose trees if they were started after the bus came up.
+
+### Configuring secrets with `.env`
+
+The CLI needs a JWT secret and a storage DSN. Both can come from the command
+line (`--secret`, `--db-dsn`) or from a config layer. Copy the committed
+template and fill it in:
+
+```bash
+cp .env.example .env
+# edit .env: set CEREBELLUM_SECRET and CEREBELLUM_DB_DSN
+```
+
+Keys (see `.env.example` for the commented template):
+
+| Key                            | Required | Meaning                                            |
+|--------------------------------|----------|----------------------------------------------------|
+| `CEREBELLUM_SECRET`            | yes      | HS256 secret for lazy-load JWT tokens              |
+| `CEREBELLUM_DB_DSN`            | yes      | SQLite path or `postgresql://…` DSN                |
+| `CEREBELLUM_ELEVATION_PASSWORD`| no       | sensitive; answers a sudo/polkit/UAC prompt in a tutorial. Leave blank to disable. |
+
+Resolution precedence is **CLI flag → real environment variable → `.env` file**.
+`--secret`/`--db-dsn` are now optional; when omitted they fall back to
+`CEREBELLUM_SECRET`/`CEREBELLUM_DB_DSN`. If no secret is found from any source the
+CLI exits with a clear error. `.env` is gitignored and must never be committed —
+only `.env.example` belongs in version control.
 
 ### Windows / UIA
 
@@ -117,6 +166,13 @@ This requires Windows 10 or 11 and the `uiautomation` and `comtypes` packages
 testing.** The UIA-dependent code is exercised on Linux only with the COM layer
 mocked. Treat the Windows path as untested against live applications until you
 have validated it on your own Windows host.
+
+There is **no `scripts/setup-linux.sh` equivalent for Windows yet.** Windows has
+no `sudo` and no SELinux; privilege elevation goes through UAC, and UIA is
+generally available without a system-wide accessibility toggle. A Windows setup
+helper (UAC handling, any required service/registry enablement) is future work
+tracked separately (see issue #5). The `.env` config layer is cross-platform and
+works on Windows today; only the privileged enablement script is Linux-specific.
 
 ## Verifying the install
 
