@@ -6,16 +6,14 @@ set. This forces realization: focus the container, scroll to top then bottom via
 the Scroll pattern, and poll ``GetChildren`` every 25 ms until the count reaches
 ``expected_min_children``, stabilizes, or the timeout elapses.
 
-Elements are duck-typed; no ``uiautomation`` import. ``ScrollPattern`` is probed
-via ``SupportsPattern`` and ``GetScrollPattern`` defensively.
+Elements are duck-typed; no ``uiautomation`` import. The Scroll pattern is probed
+via ``GetScrollPattern`` (non-``None`` means supported) defensively.
 """
 
 from __future__ import annotations
 
 import time
 from typing import Any
-
-from cerebellum_cua.uia._predicate_rules import SCROLL_PATTERN
 
 
 def stabilize_virtualized(
@@ -37,8 +35,8 @@ def stabilize_virtualized(
     last_count = 0
     while (time.time() * 1000 - start) < timeout_ms:
         try:
-            if container.SupportsPattern(SCROLL_PATTERN):
-                sp = container.GetScrollPattern()
+            sp = container.GetScrollPattern()
+            if sp is not None:
                 sp.SetScrollPercent(0, 0)
                 time.sleep(0.05)
                 sp.SetScrollPercent(0, 100)

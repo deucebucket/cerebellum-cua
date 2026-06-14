@@ -1,8 +1,9 @@
 """Unit tests for ``should_include`` — no ``uiautomation`` dependency.
 
-``MockControl`` is a plain Python object exposing the duck-typed attributes /
-methods the predicate reads (``ControlType``, ``BoundingRectangle``, ``Name``,
-``SupportsPattern``, ``GetChildren``, …). Each test pins one branch of the spec's
+``MockControl`` mirrors the real ``uiautomation`` Control surface the predicate
+reads: bare properties (``ControlType``, ``BoundingRectangle``, ``Name``, …) plus
+``Get*Pattern`` accessor methods that return a fake pattern object when supported
+or ``None`` when not, and ``GetChildren``. Each test pins one branch of the
 filtering predicate so a regression in any stage is caught on Linux CI.
 """
 
@@ -16,9 +17,13 @@ from cerebellum_cua.config import MatrixConfig
 from cerebellum_cua.model import ControlType
 from cerebellum_cua.uia.predicate import should_include
 
+# ``uiautomation`` Get*Pattern accessor names probed for interactivity.
+_INVOKE_GETTER = "GetInvokePattern"
+_VALUE_GETTER = "GetValuePattern"
+
 
 class _Rect:
-    """Minimal BoundingRectangle stub with the spec's method-style accessors."""
+    """Minimal BoundingRectangle stub with the real Rect method-style accessors."""
 
     def __init__(self, left: int, top: int, w: int, h: int) -> None:
         self.left = left
@@ -33,8 +38,19 @@ class _Rect:
         return self._h
 
 
+class _ValuePattern:
+    """Fake ValuePattern exposing the real ``.Value`` attribute."""
+
+    def __init__(self, value: Any) -> None:
+        self.Value = value
+
+
+class _GenericPattern:
+    """Fake pattern object (truthy, non-None) for non-value patterns."""
+
+
 class MockControl:
-    """Duck-typed UIA control wrapper backed by plain attributes (no COM)."""
+    """Duck-typed control mirroring the real ``uiautomation`` Control surface."""
 
     def __init__(
         self,
@@ -51,7 +67,7 @@ class MockControl:
         framework_id: str = "win32",
         is_content_element: bool = True,
         children: list[Any] | None = None,
-        supported_patterns: set[int] | None = None,
+        supported_patterns: set[str] | None = None,
         cached_value: Any = None,
         raise_on: str | None = None,
     ) -> None:
@@ -72,18 +88,31 @@ class MockControl:
         self._cached_value = cached_value
         self._raise_on = raise_on
 
-    def SupportsPattern(self, pattern_id: int) -> bool:
-        if self._raise_on == "SupportsPattern":
-            raise RuntimeError("boom")
-        return pattern_id in self._patterns
+    def _make_pattern_getter(self, getter_name: str) -> Any:
+        """Build a ``Get*Pattern`` method returning a fake pattern or None."""
+
+        def _getter() -> Any:
+            if self._raise_on == getter_name:
+                raise RuntimeError("boom")
+            if getter_name not in self._patterns:
+                return None
+            if getter_name == _VALUE_GETTER:
+                return _ValuePattern(self._cached_value)
+            return _GenericPattern()
+
+        return _getter
+
+    def __getattr__(self, item: str) -> Any:
+        # Real Controls expose Get*Pattern accessors for every pattern; synthesize
+        # them lazily so unsupported ones still return None (never AttributeError).
+        if item.startswith("Get") and item.endswith("Pattern"):
+            return self._make_pattern_getter(item)
+        raise AttributeError(item)
 
     def GetChildren(self) -> list[Any]:
         if self._raise_on == "GetChildren":
             raise RuntimeError("boom")
         return list(self._children)
-
-    def GetCachedPropertyValue(self, prop_id: int) -> Any:
-        return self._cached_value
 
 
 @pytest.fixture
@@ -167,7 +196,7 @@ def test_interactive_element_kept(config: MatrixConfig) -> None:
         is_keyboard_focusable=False,
         is_enabled=False,
         has_keyboard_focus=False,
-        supported_patterns={10000},  # InvokePattern
+        supported_patterns={_INVOKE_GETTER},  # InvokePattern supported
     )
     assert should_include(el, 4, None, {}, config) is True
 
@@ -220,6 +249,7 @@ def test_element_with_value_kept(config: MatrixConfig) -> None:
         automation_id="",
         is_keyboard_focusable=False,
         is_enabled=False,
+        supported_patterns={_VALUE_GETTER},
         cached_value="typed text",
     )
     assert should_include(el, 4, None, {}, config) is True

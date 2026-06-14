@@ -6,14 +6,14 @@ that passes :func:`should_include`. It does NOT build the Snapshot — assemblin
 
 Workarounds applied during traversal:
   * Failure 4 (recursive-walk latency): prefer a single ``GetChildren`` per node
-    (a FindAll-with-TrueCondition over direct children) instead of per-property
-    COM round-trips while descending.
-  * Failure 7 (MSAA-proxy reparenting / cycles): a visited-set keyed by RuntimeId
-    hash dedups elements so a reparented node is never walked twice.
+    over per-property round-trips while descending.
+  * Failure 7 (MSAA-proxy reparenting / cycles): a visited-set keyed by the
+    ``GetRuntimeId`` tuple dedups elements so a reparented node is never walked
+    twice.
   * Failure 2 (virtualized subtrees): List / DataGrid / Document containers are
     stabilized (children forced to realize) before their children are read.
 
-No ``uiautomation`` import here; ``root`` is a duck-typed live element.
+No ``uiautomation`` import here; ``root`` is a duck-typed live control.
 """
 
 from __future__ import annotations
@@ -23,12 +23,8 @@ from typing import Any
 
 from cerebellum_cua.config import MatrixConfig
 from cerebellum_cua.model import ControlType
-from cerebellum_cua.uia.patterns import safe_get_property
 from cerebellum_cua.uia.predicate import should_include
 from cerebellum_cua.uia.stabilize import stabilize_virtualized
-
-# RuntimeId PropertyId, used to derive a stable visited-set key (Failure 7).
-RUNTIME_ID_PROPERTY_ID = 30001
 
 # Containers whose children may be virtualized and must be stabilized first.
 _VIRTUALIZED_TYPES = {
@@ -39,8 +35,11 @@ _VIRTUALIZED_TYPES = {
 
 
 def _runtime_key(element: Any) -> Any:
-    """Stable dedup key: RuntimeId tuple if readable, else object id fallback."""
-    rid = safe_get_property(element, RUNTIME_ID_PROPERTY_ID, None)
+    """Stable dedup key: GetRuntimeId tuple if readable, else object id fallback."""
+    try:
+        rid = element.GetRuntimeId()
+    except (AttributeError, Exception):  # noqa: BLE001 - fall back to object id
+        rid = None
     if rid:
         try:
             return tuple(rid)

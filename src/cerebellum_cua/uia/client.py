@@ -5,9 +5,10 @@ requested; on Linux (or any host without the optional ``[uia]`` extra) that
 import is deferred until use and raises a clear, actionable ImportError — so
 ``import cerebellum_cua.uia`` never fails on a non-Windows dev host.
 
-It also defines the CacheRequest-style property prefetch list (the properties
-every traversal needs cached up front, per the spec's CacheRequest note) and a
-``control_type_name`` mapping back to :class:`model.ControlType` names.
+The ``uiautomation`` library reads control properties live on each access (there
+is no CacheRequest object), so this facade simply exposes the module's root /
+handle / pid / focus accessors plus a ``control_type_name`` mapping back to
+:class:`model.ControlType` names.
 """
 
 from __future__ import annotations
@@ -15,25 +16,6 @@ from __future__ import annotations
 from typing import Any
 
 from cerebellum_cua.model import ControlType
-
-# Real Microsoft UIA PropertyId constants prefetched into the cache request so a
-# single COM round-trip populates everything should_include / extraction read.
-CACHE_PROPERTY_IDS: tuple[int, ...] = (
-    30003,  # ControlType
-    30005,  # Name
-    30012,  # ClassName
-    30011,  # AutomationId
-    30001,  # RuntimeId
-    30007,  # BoundingRectangle
-    30022,  # IsOffscreen
-    30024,  # IsEnabled
-    30009,  # IsKeyboardFocusable
-    30008,  # HasKeyboardFocus
-    30017,  # FrameworkId
-    30045,  # ValueValue
-    30086,  # ToggleToggleState
-    30016,  # IsContentElement
-)
 
 # control_type int -> human-readable name, derived from model.ControlType.
 _CONTROL_TYPE_NAMES: dict[int, str] = {
@@ -74,28 +56,30 @@ class UiaClient:
             self._auto = auto
         return self._auto
 
-    def build_cache_request(self) -> Any:
-        """Construct a CacheRequest preloading :data:`CACHE_PROPERTY_IDS`."""
-        auto = self.auto
-        request = auto.CreateCacheRequest()
-        for prop_id in CACHE_PROPERTY_IDS:
-            request.AddProperty(prop_id)
-        return request
-
     def get_root(self) -> Any:
-        """Return the live desktop root element."""
-        return self.auto.GetRootElement()
+        """Return the live desktop root control (a ``PaneControl``)."""
+        return self.auto.GetRootControl()
+
+    def get_focused(self) -> Any:
+        """Return the control that currently has keyboard focus."""
+        return self.auto.GetFocusedControl()
 
     def from_handle(self, hwnd: int) -> Any:
         """Return the control owning the given native window handle (HWND)."""
         return self.auto.ControlFromHandle(hwnd)
 
     def from_pid(self, pid: int) -> Any:
-        """Return the first top-level window owned by the given process id."""
-        auto = self.auto
-        process_id_property = 30002  # ProcessId PropertyId
-        tree_scope_children = 2
-        return auto.GetRootElement().FindFirst(
-            tree_scope_children,
-            auto.CreatePropertyCondition(process_id_property, pid),
-        )
+        """Return the first top-level window owned by the given process id.
+
+        The ``uiautomation`` library has no condition-based search at the module
+        level, so this walks the desktop root's direct children and returns the
+        first whose ``ProcessId`` matches.
+        """
+        root = self.auto.GetRootControl()
+        for child in root.GetChildren():
+            try:
+                if child.ProcessId == pid:
+                    return child
+            except Exception:  # noqa: BLE001 - skip controls that fault on read
+                continue
+        return None

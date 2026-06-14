@@ -15,9 +15,10 @@ backend.
 
 > Status: **v0.1.0, early.** The engine, storage, matrix, gateway, protocol and
 > both capture backends are implemented and unit-tested. Live capture has been
-> exercised end-to-end on Linux but is **not yet validated against a broad set of
-> real applications**, and the Windows/UIA path is **untested on real Windows**
-> in this project's CI. See [Limitations](#limitations) and [ROADMAP.md](ROADMAP.md).
+> exercised end-to-end on Linux and **validated on real Windows 11** (the UIA
+> backend captures the live desktop), though it is **not yet validated against a
+> broad set of applications**. See [Limitations](#limitations) and
+> [ROADMAP.md](ROADMAP.md).
 
 ## Demo
 

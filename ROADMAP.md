@@ -5,13 +5,14 @@ issue tracker stays focused on actionable items. These are not defects; they are
 extensions that require hardware or environments not available to this project's
 automated CI.
 
-## Platform validation (needs the target OS to verify)
+## Platform validation
 
-- **Windows / UI Automation** — the `uia` capture backend and the documented UIA
-  tree-failure workarounds are implemented but have **not been validated on real
-  Windows 10/11** in this project's CI (CI is Linux-only). Live verification, the
-  Windows elevation (UAC) path, and Windows-marked integration tests remain to be
-  done on a Windows host.
+- **Windows / UI Automation** — **validated on real Windows 11** (build 26200): the
+  `uia` backend captures the live interactive desktop (184 elements across the
+  taskbar, Chrome, and Explorer, with correct control-type mapping and interactivity
+  flags). Note: UIA is per-session, so a capture process must run in the user's
+  interactive session (not a service/SSH session-0 context). Still open for Windows:
+  the UAC elevation path and broader app coverage / Windows-marked integration tests.
 - **macOS / Accessibility (AX)** — no macOS capture backend yet. The capture seam
   is OS-neutral (`uia`, `atspi` today), so an `ax` backend can be added against the
   same `CaptureBackend` interface, mapping AX roles into the canonical control-type

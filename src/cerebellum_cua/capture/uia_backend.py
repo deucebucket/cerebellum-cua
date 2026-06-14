@@ -7,10 +7,9 @@ everything downstream consumes normalized :class:`CapturedElement` records and
 never touches live COM.
 
 Import-safety: this module never imports ``uiautomation`` at module scope. All
-COM access flows through ``UiaClient`` (whose import is lazy/guarded) and through
-``sys.platform`` checks, so ``import cerebellum_cua.capture.uia_backend`` succeeds on
-Linux. Live capture / action execution raise :class:`CaptureNotAvailable` on a
-non-Windows host instead of a bare ImportError.
+COM access flows through ``UiaClient`` (lazy/guarded import) and ``sys.platform``
+checks, so importing this module succeeds on Linux; live capture / action
+execution raise :class:`CaptureNotAvailable` off-Windows, not a bare ImportError.
 """
 
 from __future__ import annotations
@@ -38,25 +37,24 @@ from cerebellum_cua.uia import (
     walk,
 )
 
-# Real Microsoft UIA PropertyId constants used to extract CapturedElement fields.
-_PROP_CONTROL_TYPE = 30003
-_PROP_NAME = 30005
-_PROP_CLASS_NAME = 30012
-_PROP_AUTOMATION_ID = 30011
-_PROP_RUNTIME_ID = 30001
-_PROP_BOUNDING_RECT = 30007
-_PROP_FRAMEWORK_ID = 30017
-_PROP_PROVIDER_DESCRIPTION = 30107
-_PROP_NATIVE_WINDOW_HANDLE = 30020
-_PROP_PROCESS_ID = 30002
-_PROP_IS_ENABLED = 30024
-_PROP_IS_KEYBOARD_FOCUSABLE = 30009
-_PROP_HAS_KEYBOARD_FOCUS = 30008
-_PROP_IS_OFFSCREEN = 30022
-_PROP_IS_CONTENT = 30016
+# ``uiautomation`` Control attribute names used to extract CapturedElement fields.
+_PROP_CONTROL_TYPE = "ControlType"
+_PROP_NAME = "Name"
+_PROP_CLASS_NAME = "ClassName"
+_PROP_AUTOMATION_ID = "AutomationId"
+_PROP_RUNTIME_ID = "RuntimeId"
+_PROP_BOUNDING_RECT = "BoundingRectangle"
+_PROP_FRAMEWORK_ID = "FrameworkId"
+_PROP_NATIVE_WINDOW_HANDLE = "NativeWindowHandle"
+_PROP_PROCESS_ID = "ProcessId"
+_PROP_IS_ENABLED = "IsEnabled"
+_PROP_IS_KEYBOARD_FOCUSABLE = "IsKeyboardFocusable"
+_PROP_HAS_KEYBOARD_FOCUS = "HasKeyboardFocus"
+_PROP_IS_OFFSCREEN = "IsOffscreen"
+_PROP_IS_CONTENT = "IsContentElement"
 
-# TreeScope.Descendants, for the Name + ControlType re-find in reacquire().
-_TREE_SCOPE_DESCENDANTS = 4
+# Search the whole subtree under the desktop root in reacquire().
+_SEARCH_DEPTH_DESCENDANTS = 0xFFFFFFFF
 
 
 def _on_windows() -> bool:
@@ -65,10 +63,24 @@ def _on_windows() -> bool:
 
 
 def _rect_from_uia(raw: Any) -> BoundingRect:
-    """Normalize a UIA bounding rectangle ``[l, t, r, b]`` to a BoundingRect."""
+    """Normalize a ``uiautomation`` ``Rect`` (or ``[l, t, r, b]``) to a BoundingRect.
+
+    Accepts both the library's ``Rect`` object (``.left/.top/.right/.bottom``)
+    and a plain 4-tuple/list for test fakes.
+    """
+    if raw is None:
+        return BoundingRect()
     try:
-        left, top, right, bottom = (int(v) for v in raw[:4])
-    except (TypeError, ValueError, IndexError):
+        if hasattr(raw, "left") and hasattr(raw, "right"):
+            left, top, right, bottom = (
+                int(raw.left),
+                int(raw.top),
+                int(raw.right),
+                int(raw.bottom),
+            )
+        else:
+            left, top, right, bottom = (int(v) for v in raw[:4])
+    except (TypeError, ValueError, IndexError, AttributeError):
         return BoundingRect()
     return BoundingRect(
         left=left,
@@ -102,10 +114,7 @@ def _element_to_captured(element: Any) -> CapturedElement:
         "has_keyboard_focus": has_focus,
         "value": value,
         "framework_id": framework_id,
-        "provider_description": safe_get_property(
-            element, _PROP_PROVIDER_DESCRIPTION, ""
-        )
-        or "",
+        "provider_description": "",
         "native_window_handle": int(
             safe_get_property(element, _PROP_NATIVE_WINDOW_HANDLE, 0) or 0
         ),
@@ -183,15 +192,16 @@ class UiaCaptureBackend(CaptureBackend):
             return None
         try:
             auto = self._client.auto
-            root = auto.GetRootElement()
-            condition = auto.CreateAndCondition(
-                auto.CreatePropertyCondition(_PROP_NAME, name),
-                auto.CreatePropertyCondition(_PROP_CONTROL_TYPE, int(control_type)),
+            candidate = auto.Control(
+                searchFromControl=auto.GetRootControl(),
+                searchDepth=_SEARCH_DEPTH_DESCENDANTS,
+                Name=name,
+                ControlType=int(control_type),
             )
-            live = root.FindFirst(_TREE_SCOPE_DESCENDANTS, condition)
+            if not candidate.Exists(0.5, 0.1):
+                return None
+            live = candidate
         except Exception:  # noqa: BLE001 - COM/import failure -> not re-acquired
-            return None
-        if live is None:
             return None
         return _element_to_captured(live)
 
@@ -224,11 +234,16 @@ class UiaCaptureBackend(CaptureBackend):
         self, native: Any, pattern_name: str, method: str, *args: Any
     ) -> bool:
         """Resolve a UIA pattern object on ``native`` and call ``method`` on it."""
-        pid = PATTERN_MAP.get(pattern_name)
-        if pid is None:  # pragma: no cover - PATTERN_MAP is static
+        getter_name = PATTERN_MAP.get(pattern_name)
+        if getter_name is None:  # pragma: no cover - PATTERN_MAP is static
             raise ActionNotSupported(f"unknown pattern {pattern_name!r}")
+        getter = getattr(native, getter_name, None)
+        if getter is None:
+            raise ActionNotSupported(
+                f"pattern {pattern_name!r} unavailable on element"
+            )
         try:
-            pattern = native.GetPattern(pid)
+            pattern = getter()
         except Exception as exc:  # noqa: BLE001 - COM/attribute failure
             raise ActionNotSupported(
                 f"pattern {pattern_name!r} unavailable on element"
