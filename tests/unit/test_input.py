@@ -39,8 +39,10 @@ def _ydotool_input(monkeypatch: Any, rec: _Recorder, present: bool = True) -> Sy
 
     monkeypatch.setattr(mod.shutil, "which", lambda _n: "/usr/bin/ydotool" if present else None)
     monkeypatch.setattr(mod.subprocess, "run", rec.run)
-    # Force the ydotool route (skip Atspi entirely).
-    return SyntheticInput(prefer_ydotool=True)
+    # Force the ydotool route (skip Atspi entirely). "instant" keeps the argv
+    # shape one-move-then-click for these backend tests; motion is covered in
+    # test_motion.py.
+    return SyntheticInput(prefer_ydotool=True, speed="instant")
 
 
 def test_click_builds_mousemove_then_click(monkeypatch: Any) -> None:
@@ -118,6 +120,8 @@ def test_atspi_route_used_when_available(monkeypatch: Any) -> None:
     monkeypatch.setattr(SyntheticInput, "_atspi", staticmethod(lambda: _FakeAtspi))
     # ydotool absent: if Atspi were skipped, this would raise.
     monkeypatch.setattr(mod.shutil, "which", lambda _n: None)
-    si = SyntheticInput(prefer_ydotool=False)
+    # instant: one absolute move ("abs") then one atomic click ("b1c"), no
+    # glide path and no press/release decomposition.
+    si = SyntheticInput(prefer_ydotool=False, speed="instant")
     assert si.click(7, 8) is True
-    assert sent == [(7, 8, "b1c")]
+    assert sent == [(7, 8, "abs"), (7, 8, "b1c")]

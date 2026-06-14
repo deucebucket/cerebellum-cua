@@ -200,7 +200,8 @@ def test_invoke_action_click_point_uses_synthetic_input(
     clicks: list[tuple[int, int, str, bool]] = []
 
     def _fake_click(
-        self: Any, x: int, y: int, button: str = "left", double: bool = False
+        self: Any, x: int, y: int, button: str = "left", double: bool = False,
+        abort: Any = None,
     ) -> bool:
         clicks.append((x, y, button, double))
         return True

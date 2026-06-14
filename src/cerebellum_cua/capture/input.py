@@ -13,9 +13,17 @@ Strategy, display-server aware:
   Wayland compositors.
 * On Wayland (``XDG_SESSION_TYPE=wayland``) or when the Atspi route is
   unavailable/fails, fall back to the ``ydotool`` CLI if it is on ``PATH``
-  (``ydotool click`` / ``ydotool type`` / ``ydotool key``). ``ydotool`` needs its
-  daemon (``ydotoold``) running and uinput permissions.
+  (``ydotool mousemove`` / ``ydotool click`` / ``ydotool type`` / ``ydotool
+  key``). ``ydotool`` needs its daemon (``ydotoold``) running and uinput
+  permissions.
 * If neither method is available, raise :class:`SyntheticInputError`.
+
+**Motion profile.** Actions are human-observable by default: the cursor *glides*
+to the target along an ease-in-out path over ``move_duration`` seconds across
+``steps`` increments, clicks are decomposed into move/pause/press/hold/release,
+and typing is paced per character. The ``"instant"`` profile bypasses all
+interpolation and sleeps (one move, immediate click/type) for headless runs and
+fast tests. Coordinate input requires XTEST (X11) or ydotool (Wayland).
 
 Every import is lazy/guarded so importing this module succeeds on any host.
 """
@@ -25,7 +33,11 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
-from typing import Any
+import threading
+import time
+
+from cerebellum_cua.capture._atspi_input import AtspiInputMixin
+from cerebellum_cua.capture._motion import interpolate_path
 
 # ydotool keycode aliases for the modifiers/keys we name in a combo string. These
 # are Linux input-event keycodes (linux/input-event-codes.h), what ydotool expects.
@@ -43,40 +55,98 @@ _YDOTOOL_KEYCODES: dict[str, int] = {
     "y": 21, "z": 44,
 }
 
-# Atspi mouse-event sync strings for a button + click/press/release.
-_ATSPI_MOUSE = {
-    ("left", False): "b1c", ("left", True): "b1d",
-    ("right", False): "b3c", ("middle", False): "b2c",
-}
+# ydotool click codes: down+up combined.
+_YDOTOOL_CLICK = {"left": "0xC0", "right": "0xC1", "middle": "0xC2"}
+
+# A sensible starting point for the first glide when no prior position is known.
+_DEFAULT_ORIGIN = (960, 540)
+
+
+def _aborted(abort: threading.Event | None) -> bool:
+    """True if an abort event has been supplied and is set."""
+    return abort is not None and abort.is_set()
 
 
 class SyntheticInputError(RuntimeError):
     """Raised when no synthetic-input method is available on this host."""
 
 
-class SyntheticInput:
-    """Best-effort synthetic mouse/keyboard input (X11 XTEST or ydotool)."""
+class SyntheticInput(AtspiInputMixin):
+    """Best-effort, human-paced synthetic mouse/keyboard input.
 
-    def __init__(self, prefer_ydotool: bool | None = None) -> None:
+    Motion is tunable via the constructor:
+
+    * ``speed`` — ``"human"`` (animated, default) or ``"instant"`` (one jump,
+      no sleeps; for headless/fast paths).
+    * ``move_duration`` — seconds a glide spans (human mode).
+    * ``steps`` — interpolation increments per glide (human mode).
+    * ``click_pause`` — pause after arriving before pressing, and the press hold.
+    * ``key_delay`` — per-character delay for paced typing (seconds).
+
+    All motion methods accept an optional ``abort`` :class:`threading.Event`;
+    when it is set mid-motion the method stops immediately and raises
+    :class:`~cerebellum_cua.capture.abort.AbortedByUser`.
+    """
+
+    def __init__(
+        self,
+        prefer_ydotool: bool | None = None,
+        speed: str = "human",
+        move_duration: float = 0.5,
+        steps: int = 30,
+        click_pause: float = 0.08,
+        key_delay: float = 0.012,
+    ) -> None:
         # On Wayland, XTEST-backed Atspi events do not work, so prefer ydotool.
         if prefer_ydotool is None:
             prefer_ydotool = os.environ.get("XDG_SESSION_TYPE", "").lower() == "wayland"
         self._prefer_ydotool = prefer_ydotool
+        self.speed = speed
+        self.move_duration = float(move_duration)
+        self.steps = max(1, int(steps))
+        self.click_pause = float(click_pause)
+        self.key_delay = float(key_delay)
+        #: Last cursor position we drove the pointer to (None until first move).
+        self._last_pos: tuple[int, int] | None = None
+
+    @property
+    def instant(self) -> bool:
+        """True when no interpolation/sleeps should be emitted."""
+        return self.speed == "instant"
 
     # --- public API ------------------------------------------------------
-    def click(
-        self, x: int, y: int, button: str = "left", double: bool = False
+    def move(
+        self, x: int, y: int, abort: threading.Event | None = None
     ) -> bool:
-        """Click at screen coordinate ``(x, y)``. Returns True on a sent event."""
-        if not self._prefer_ydotool and self._atspi_click(x, y, button, double):
-            return True
-        return self._ydotool_click(x, y, button, double)
+        """Glide the cursor to ``(x, y)``; returns True on a sent move."""
+        return self._glide(int(x), int(y), abort)
 
-    def type_text(self, text: str) -> bool:
-        """Type ``text`` into whatever currently has focus."""
-        if not self._prefer_ydotool and self._atspi_type(text):
-            return True
-        return self._ydotool(["type", "--", text])
+    def click(
+        self,
+        x: int,
+        y: int,
+        button: str = "left",
+        double: bool = False,
+        abort: threading.Event | None = None,
+    ) -> bool:
+        """Click at ``(x, y)``: glide, pause, press, hold, release.
+
+        In ``instant`` mode this collapses to one move + one atomic click.
+        """
+        self._glide(int(x), int(y), abort)
+        if self.instant:
+            return self._atomic_click(x, y, button, double)
+        return self._natural_click(x, y, button, double, abort)
+
+    def type_text(
+        self, text: str, abort: threading.Event | None = None
+    ) -> bool:
+        """Type ``text`` into whatever currently has focus (paced per char)."""
+        if self.instant or self.key_delay <= 0:
+            if not self._prefer_ydotool and self._atspi_type(text):
+                return True
+            return self._ydotool(["type", "--", text])
+        return self._paced_type(text, abort)
 
     def key(self, combo: str) -> bool:
         """Send a key combo like ``"ctrl+s"`` (modifiers joined with ``+``)."""
@@ -84,59 +154,91 @@ class SyntheticInput:
             return True
         return self._ydotool_key(combo)
 
-    # --- Atspi (X11 / XTEST) route --------------------------------------
-    @staticmethod
-    def _atspi() -> Any:
-        try:
-            import gi  # noqa: PLC0415
+    # --- motion: cursor glide -------------------------------------------
+    def _glide(
+        self, x: int, y: int, abort: threading.Event | None
+    ) -> bool:
+        """Move the pointer to ``(x, y)`` along an eased path, honoring abort."""
+        from cerebellum_cua.capture.abort import AbortedByUser  # noqa: PLC0415
 
-            gi.require_version("Atspi", "2.0")
-            from gi.repository import Atspi  # noqa: PLC0415
-        except (ImportError, ValueError):
-            return None
-        return Atspi
-
-    def _atspi_click(self, x: int, y: int, button: str, double: bool) -> bool:
-        atspi = self._atspi()
-        gen = getattr(atspi, "generate_mouse_event", None) if atspi else None
-        if gen is None:
-            return False
-        sync = _ATSPI_MOUSE.get((button, double)) or _ATSPI_MOUSE[("left", False)]
-        try:
-            gen(int(x), int(y), sync)
+        target = (x, y)
+        if self.instant:
+            self._move_abs(x, y)
+            self._last_pos = target
             return True
-        except Exception:  # noqa: BLE001
-            return False
 
-    def _atspi_type(self, text: str) -> bool:
-        atspi = self._atspi()
-        gen = getattr(atspi, "generate_keyboard_event", None) if atspi else None
-        kind = getattr(atspi, "KeySynthType", None) if atspi else None
-        if gen is None or kind is None:
-            return False
-        try:
-            gen(0, text, kind.STRING)
-            return True
-        except Exception:  # noqa: BLE001
-            return False
+        start = self._last_pos if self._last_pos is not None else _DEFAULT_ORIGIN
+        path = interpolate_path(start, target, self.steps)
+        per_step = self.move_duration / max(1, len(path))
+        for px, py in path:
+            if _aborted(abort):
+                raise AbortedByUser("user took over during cursor move")
+            self._move_abs(px, py)
+            self._last_pos = (px, py)
+            if per_step > 0:
+                time.sleep(per_step)
+        self._last_pos = target
+        return True
 
-    def _atspi_key(self, combo: str) -> bool:
-        atspi = self._atspi()
-        gen = getattr(atspi, "generate_keyboard_event", None) if atspi else None
-        kind = getattr(atspi, "KeySynthType", None) if atspi else None
-        if gen is None or kind is None:
-            return False
-        try:
-            gen(0, combo, kind.SYM)
+    def _move_abs(self, x: int, y: int) -> bool:
+        """Emit one absolute pointer move via the active backend."""
+        if not self._prefer_ydotool and self._atspi_move(x, y):
             return True
-        except Exception:  # noqa: BLE001
-            return False
+        return self._ydotool(
+            ["mousemove", "--absolute", "-x", str(int(x)), "-y", str(int(y))]
+        )
+
+    # --- clicks ----------------------------------------------------------
+    def _atomic_click(self, x: int, y: int, button: str, double: bool) -> bool:
+        """A single combined click (instant mode / no decomposition)."""
+        if not self._prefer_ydotool and self._atspi_click(x, y, button, double):
+            return True
+        return self._ydotool_click(button, double)
+
+    def _natural_click(
+        self,
+        x: int,
+        y: int,
+        button: str,
+        double: bool,
+        abort: threading.Event | None,
+    ) -> bool:
+        """Move-settle-press-hold-release, approximating a human click."""
+        from cerebellum_cua.capture.abort import AbortedByUser  # noqa: PLC0415
+
+        if _aborted(abort):
+            raise AbortedByUser("user took over before click")
+        time.sleep(self.click_pause)
+        if not self._prefer_ydotool and self._atspi_press_release(x, y, button):
+            if double:
+                self._atspi_press_release(x, y, button)
+            return True
+        return self._ydotool_click(button, double)
+
+    # --- paced typing ----------------------------------------------------
+    def _paced_type(
+        self, text: str, abort: threading.Event | None
+    ) -> bool:
+        """Type with a per-character delay; ydotool uses ``--key-delay`` (ms)."""
+        from cerebellum_cua.capture.abort import AbortedByUser  # noqa: PLC0415
+
+        if not self._prefer_ydotool and self._atspi():
+            for ch in text:
+                if _aborted(abort):
+                    raise AbortedByUser("user took over during typing")
+                if not self._atspi_type(ch):
+                    break
+                time.sleep(self.key_delay)
+            else:
+                return True
+        if _aborted(abort):
+            raise AbortedByUser("user took over during typing")
+        delay_ms = str(int(self.key_delay * 1000))
+        return self._ydotool(["type", "--key-delay", delay_ms, "--", text])
 
     # --- ydotool route ---------------------------------------------------
-    def _ydotool_click(self, x: int, y: int, button: str, double: bool) -> bool:
-        # ydotool click codes: 0xC0=left, 0xC1=right, 0xC2=middle (down+up).
-        code = {"left": "0xC0", "right": "0xC1", "middle": "0xC2"}.get(button, "0xC0")
-        self._ydotool(["mousemove", "--absolute", "-x", str(int(x)), "-y", str(int(y))])
+    def _ydotool_click(self, button: str, double: bool) -> bool:
+        code = _YDOTOOL_CLICK.get(button, "0xC0")
         repeat = ["--repeat", "2"] if double else []
         return self._ydotool(["click", *repeat, code])
 

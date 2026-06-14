@@ -19,6 +19,10 @@ uia = ["uiautomation>=2.0", "comtypes>=1.2"]
 postgres = ["psycopg2-binary>=2.9"]
 # MCP server wrapper (exposes the five operations as MCP tools).
 mcp = ["mcp>=1.0"]
+# User-takeover kill-switch: read Linux evdev devices to detect real user input
+# during synthetic motion. Linux-only; needs read access to /dev/input (user in
+# the `input` group). Optional — without it the kill-switch degrades to a no-op.
+input = ["evdev>=1.6"]
 # Dev / test tooling.
 dev = [
     "pytest>=8.0",
