@@ -1,42 +1,145 @@
-"""Live action invocation (Windows-only COM, isolated from the handlers).
+"""Live action execution through the capture seam (element + coordinate forms).
 
-``invoke_element`` re-acquires a live UIA element from a persisted
-:class:`~cerebellum_cua.model.Element` (by Name + ControlType, the spec's demo re-find)
-and fires its InvokePattern. It touches COM only via the
-:class:`~cerebellum_cua.uia.UiaClient` facade, so importing this module never fails on
-Linux; calling it without ``uiautomation`` raises a clear ImportError that the
-handler maps to a typed :class:`~cerebellum_cua.errors.UIAAccessDeniedError`.
+This is the action half of issue #3: drive the PC like a user without screenshots.
+It routes ``invoke_action`` requests to the right place:
+
+* **Element actions** load the persisted :class:`~cerebellum_cua.model.Element`, rebuild
+  its re-acquisition identity from ``metadata`` (the AT-SPI child-index path stored
+  at capture), ask the capture backend to re-find a live element, then invoke the
+  semantic action on it (click / set_text / toggle / set_value / select / …).
+* **Coordinate / raw-input forms** (``click_point`` / ``type`` / ``key``) bypass the
+  accessibility tree and synthesize input via :class:`~cerebellum_cua.capture.input.SyntheticInput`.
+
+Everything is import-safe on any host: capture/backend imports are lazy and any
+"cannot run here" condition surfaces as a typed :class:`~cerebellum_cua.errors.UIAAccessDeniedError`
+rather than a bare crash.
 """
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
+from cerebellum_cua.errors import ElementNotFoundError, UIAAccessDeniedError
 from cerebellum_cua.model import Element
-from cerebellum_cua.uia import UiaClient
 
-# Raw UIA constants for the re-find + invoke (mirrors spec Section 5 demo path).
-_NAME_PROPERTY_ID = 30005
-_CONTROL_TYPE_PROPERTY_ID = 30003
-_INVOKE_PATTERN_ID = 10000
-_TREE_SCOPE_DESCENDANTS = 4
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    from cerebellum_cua.cli.engine import CuaEngine
+
+# Coordinate / raw-input actions that bypass the a11y tree entirely.
+_COORDINATE_ACTIONS = frozenset({"click_point", "type", "key"})
+
+_NO_BACKEND = (
+    "Live action execution is unavailable on this host: no capture backend could "
+    "re-acquire the element (UIA needs Windows + 'uiautomation'; AT-SPI needs a "
+    "reachable Linux a11y bus). The element could not be driven."
+)
+
+_NO_REACQUIRE = (
+    "Could not re-acquire element row {row_id} on the live tree (it may have moved, "
+    "closed, or the snapshot is stale). Re-run build_matrix and retry."
+)
 
 
-def invoke_element(element: Element, client: UiaClient | None = None) -> bool:
-    """Re-find ``element`` on the live tree and invoke it. Returns success.
+def perform_action(engine: CuaEngine, payload: dict[str, Any]) -> dict[str, Any]:
+    """Execute one ``invoke_action`` request and return its result payload."""
+    action = str(payload.get("action") or "invoke")
+    if action in _COORDINATE_ACTIONS:
+        return _coordinate_action(action, payload)
+    return _element_action(engine, action, payload)
 
-    Raises:
-        ImportError: with an actionable hint when ``uiautomation`` is absent.
-    """
-    cli = client or UiaClient()
-    auto = cli.auto  # triggers the guarded lazy import (ImportError on Linux)
-    root = auto.GetRootElement()
-    condition = auto.CreateAndCondition(
-        auto.CreatePropertyCondition(_NAME_PROPERTY_ID, element.name),
-        auto.CreatePropertyCondition(_CONTROL_TYPE_PROPERTY_ID, element.control_type),
+
+def _coordinate_action(action: str, payload: dict[str, Any]) -> dict[str, Any]:
+    """Synthesize coordinate/raw input (no element, no snapshot needed)."""
+    from cerebellum_cua.capture.input import (  # noqa: PLC0415
+        SyntheticInput,
+        SyntheticInputError,
     )
-    live: Any = root.FindFirst(_TREE_SCOPE_DESCENDANTS, condition)
-    if live and live.SupportsPattern(_INVOKE_PATTERN_ID):
-        live.GetInvokePattern().Invoke()
-        return True
-    return False
+
+    si = SyntheticInput()
+    try:
+        if action == "click_point":
+            ok = si.click(
+                int(payload["x"]), int(payload["y"]),
+                button=str(payload.get("button", "left")),
+                double=bool(payload.get("double", False)),
+            )
+        elif action == "type":
+            ok = si.type_text(str(payload.get("value", "")))
+        else:  # "key"
+            ok = si.key(str(payload["value"]))
+    except SyntheticInputError as exc:
+        raise UIAAccessDeniedError(
+            reason="synthetic_input_unavailable", detail=str(exc)
+        ) from exc
+    return {"success": bool(ok), "action": action}
+
+
+def _element_action(
+    engine: CuaEngine, action: str, payload: dict[str, Any]
+) -> dict[str, Any]:
+    """Re-acquire the persisted element and invoke a semantic action on it."""
+    from cerebellum_cua.capture import (  # noqa: PLC0415
+        ActionNotSupported,
+        CaptureNotAvailable,
+    )
+
+    snapshot_id, row_id = _resolve_target(engine, payload)
+    element = engine.storage.get_element(snapshot_id, row_id)
+    if element is None:
+        raise ElementNotFoundError(snapshot_id=snapshot_id, row_id=row_id)
+
+    try:
+        backend = engine.get_capture_backend()
+        live = backend.reacquire(_identity(element))
+    except (CaptureNotAvailable, ImportError) as exc:
+        raise UIAAccessDeniedError(
+            reason="capture_unavailable", detail=_NO_BACKEND
+        ) from exc
+    if live is None:
+        raise UIAAccessDeniedError(
+            reason="reacquire_failed", detail=_NO_REACQUIRE.format(row_id=row_id)
+        )
+
+    params = dict(payload.get("params") or {})
+    if "value" in payload:
+        params.setdefault("value", payload["value"])
+    try:
+        ok = backend.invoke(live, action, **params)
+    except (ActionNotSupported, CaptureNotAvailable) as exc:
+        raise UIAAccessDeniedError(
+            reason="action_unsupported", detail=str(exc)
+        ) from exc
+    if not ok:
+        return {"success": False, "action": action}
+    return {
+        "success": True,
+        "action": action,
+        "new_epoch": engine.current_epoch + 1,
+        "affected_rows": [row_id],
+    }
+
+
+def _identity(element: Element) -> dict[str, Any]:
+    """Build the backend re-acquisition identity from a persisted element.
+
+    Keys: ``atspi_path`` (required for AT-SPI re-find), ``name`` and ``role`` for
+    the loose verification, plus ``control_type``/``class_name`` as extra context.
+    """
+    meta = element.metadata or {}
+    return {
+        "atspi_path": meta.get("atspi_path"),
+        "atspi_role": meta.get("atspi_role"),
+        "name": element.name,
+        "control_type": element.control_type,
+        "class_name": element.class_name,
+    }
+
+
+def _resolve_target(engine: CuaEngine, payload: dict[str, Any]) -> tuple[int, int]:
+    """Resolve (snapshot_id, row_id), defaulting snapshot to the latest persisted."""
+    sid = payload.get("snapshot_id")
+    if sid is None:
+        sid = engine.storage.get_last_snapshot_id()
+        if sid is None:
+            raise ElementNotFoundError(reason="no_snapshot_persisted")
+    return int(sid), int(payload["row_id"])

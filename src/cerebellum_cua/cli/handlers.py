@@ -32,11 +32,6 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
 
 Handler = Callable[[dict[str, Any]], dict[str, Any]]
 
-_NOT_ON_LINUX = (
-    "Live UIA {what} requires Windows 10/11 with the 'uiautomation' package "
-    "(pip install -e '.[uia]'). This host cannot perform live capture."
-)
-
 _NO_CAPTURE = (
     "Capture backend {kind!r} is not available on this host. UIA needs Windows + "
     "'uiautomation'; AT-SPI needs a reachable Linux a11y bus (org.a11y.Bus) with "
@@ -157,31 +152,22 @@ class OperationHandlers:
             include_semantics=bool(payload.get("include_semantics", True)),
         )
 
-    # --- invoke_action (Windows-only live invoke) ------------------------
+    # --- invoke_action (live action via the capture seam) ----------------
     def invoke_action(self, payload: dict[str, Any]) -> dict[str, Any]:
-        """Invoke an element's default action on the live tree (Windows only)."""
-        from cerebellum_cua.cli.invoke import invoke_element  # noqa: PLC0415 - lazy COM
+        """Execute a live action: element actions (re-acquired via the capture
+        backend) or coordinate/raw-input forms (synthetic input).
 
-        eng = self._engine
-        snapshot_id = self._snapshot_id(payload)
-        row_id = int(payload["row_id"])
-        element = eng.storage.get_element(snapshot_id, row_id)
-        if element is None:
-            raise ElementNotFoundError(snapshot_id=snapshot_id, row_id=row_id)
-        try:
-            ok = invoke_element(element, eng.uia)
-        except ImportError as exc:
-            raise UIAAccessDeniedError(
-                reason="uia_unavailable",
-                detail=_NOT_ON_LINUX.format(what="invoke_action"),
-            ) from exc
-        if not ok:
-            return {"success": False}
-        return {
-            "success": True,
-            "new_epoch": eng.current_epoch + 1,
-            "affected_rows": [row_id],
-        }
+        Element forms take ``row_id`` (+ optional ``snapshot_id``), an ``action``
+        (default ``"invoke"``), and optional ``value``/``params``. Coordinate forms
+        are ``{"action":"click_point","x","y"}``, ``{"action":"type","value"}``, and
+        ``{"action":"key","value"}``. On an unavailable backend, a failed
+        re-acquire, or an unsupported action, a typed
+        :class:`~cerebellum_cua.errors.UIAAccessDeniedError` (code 1006) is raised — never a
+        bare crash.
+        """
+        from cerebellum_cua.cli.invoke import perform_action  # noqa: PLC0415 - lazy
+
+        return perform_action(self._engine, payload)
 
     # --- get_snapshot_diff (in-memory epoch history) ---------------------
     def get_snapshot_diff(self, payload: dict[str, Any]) -> dict[str, Any]:

@@ -55,6 +55,9 @@ _PROP_HAS_KEYBOARD_FOCUS = 30008
 _PROP_IS_OFFSCREEN = 30022
 _PROP_IS_CONTENT = 30016
 
+# TreeScope.Descendants, for the Name + ControlType re-find in reacquire().
+_TREE_SCOPE_DESCENDANTS = 4
+
 
 def _on_windows() -> bool:
     """True only on a Windows host (where live UIA COM is available)."""
@@ -165,6 +168,32 @@ class UiaCaptureBackend(CaptureBackend):
             captured = _element_to_captured(element)
             parent_key = id(parent) if parent is not None else None
             yield captured, _depth, parent_key
+
+    def reacquire(self, identity: dict[str, Any]) -> CapturedElement | None:
+        """Re-find a live UIA element by Name + ControlType (spec demo re-find).
+
+        ``identity`` needs ``name`` and ``control_type``. Returns ``None`` off
+        Windows, on a COM failure, or when no element matches — never crashes.
+        """
+        if not _on_windows():
+            return None
+        name = identity.get("name")
+        control_type = identity.get("control_type")
+        if not name or control_type is None:
+            return None
+        try:
+            auto = self._client.auto
+            root = auto.GetRootElement()
+            condition = auto.CreateAndCondition(
+                auto.CreatePropertyCondition(_PROP_NAME, name),
+                auto.CreatePropertyCondition(_PROP_CONTROL_TYPE, int(control_type)),
+            )
+            live = root.FindFirst(_TREE_SCOPE_DESCENDANTS, condition)
+        except Exception:  # noqa: BLE001 - COM/import failure -> not re-acquired
+            return None
+        if live is None:
+            return None
+        return _element_to_captured(live)
 
     def invoke(
         self, element: CapturedElement, action: str = "invoke", **params: Any

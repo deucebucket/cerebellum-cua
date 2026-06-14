@@ -137,11 +137,96 @@ def test_build_matrix_unavailable_backend_returns_clean_typed_error(
     assert resp["error"]["details"]["reason"] == "capture_unavailable"
 
 
-def test_invoke_action_on_linux_returns_clean_typed_error(engine: CuaEngine) -> None:
+def test_invoke_action_unreacquirable_returns_clean_typed_error(
+    engine: CuaEngine, monkeypatch: Any
+) -> None:
+    # Force a usable AT-SPI backend whose reacquire fails: must surface as a clean
+    # typed 1006, never a crash. (The seeded element carries no atspi_path.)
+    import cerebellum_cua.capture as cap
+
+    class _StubBackend:
+        def reacquire(self, identity: dict[str, Any]) -> None:
+            return None
+
+    monkeypatch.setattr(cap, "get_capture_backend", lambda kind="auto": _StubBackend())
     sid = engine.register_seed(_window_with_button(epoch=1))["snapshot_id"]
     resp = _call(engine, "invoke_action", {"snapshot_id": sid, "row_id": 1})
     assert resp["payload"] is None
-    assert resp["error"]["code"] == 1006  # UIA_ACCESS_DENIED
+    assert resp["error"]["code"] == 1006
+    assert resp["error"]["details"]["reason"] == "reacquire_failed"
+
+
+def test_invoke_action_routes_to_backend_invoke(
+    engine: CuaEngine, monkeypatch: Any
+) -> None:
+    import cerebellum_cua.capture as cap
+
+    seen: dict[str, Any] = {}
+
+    class _Live:
+        pass
+
+    class _StubBackend:
+        def reacquire(self, identity: dict[str, Any]) -> Any:
+            seen["identity"] = identity
+            return _Live()
+
+        def invoke(self, live: Any, action: str, **params: Any) -> bool:
+            seen["action"] = action
+            seen["params"] = params
+            return True
+
+    monkeypatch.setattr(cap, "get_capture_backend", lambda kind="auto": _StubBackend())
+    sid = engine.register_seed(_window_with_button(epoch=1))["snapshot_id"]
+    resp = _call(
+        engine,
+        "invoke_action",
+        {"snapshot_id": sid, "row_id": 1, "action": "set_text", "value": "hi"},
+    )
+    assert resp["error"] is None
+    assert resp["payload"]["success"] is True
+    assert resp["payload"]["action"] == "set_text"
+    assert resp["payload"]["affected_rows"] == [1]
+    assert seen["action"] == "set_text"
+    assert seen["params"] == {"value": "hi"}
+    assert "name" in seen["identity"]
+
+
+def test_invoke_action_click_point_uses_synthetic_input(
+    engine: CuaEngine, monkeypatch: Any
+) -> None:
+    import cerebellum_cua.capture.input as inp
+
+    clicks: list[tuple[int, int, str, bool]] = []
+
+    def _fake_click(
+        self: Any, x: int, y: int, button: str = "left", double: bool = False
+    ) -> bool:
+        clicks.append((x, y, button, double))
+        return True
+
+    monkeypatch.setattr(inp.SyntheticInput, "click", _fake_click)
+    resp = _call(
+        engine, "invoke_action", {"action": "click_point", "x": 12, "y": 34}
+    )
+    assert resp["error"] is None
+    assert resp["payload"] == {"success": True, "action": "click_point"}
+    assert clicks == [(12, 34, "left", False)]
+
+
+def test_invoke_action_synthetic_unavailable_returns_typed_error(
+    engine: CuaEngine, monkeypatch: Any
+) -> None:
+    import cerebellum_cua.capture.input as inp
+
+    def _boom(self: Any, *a: Any, **k: Any) -> bool:
+        raise inp.SyntheticInputError("no ydotool")
+
+    monkeypatch.setattr(inp.SyntheticInput, "key", _boom)
+    resp = _call(engine, "invoke_action", {"action": "key", "value": "ctrl+s"})
+    assert resp["payload"] is None
+    assert resp["error"]["code"] == 1006
+    assert resp["error"]["details"]["reason"] == "synthetic_input_unavailable"
 
 
 # --- protocol contract ---------------------------------------------------

@@ -226,30 +226,69 @@ is a fresh token the agent can pass to a further `load_children` call.
 
 ### invoke_action
 
-Re-finds an element on the live tree and fires its default action. This requires
-a live backend; on Linux without a working backend, or on a host without
-`uiautomation`, it returns error `1006`. Payload: `row_id` (required) and
-optional `snapshot_id`.
+Executes a live action against the desktop through the capture seam. Two payload
+forms are accepted.
 
-Request:
+**Element actions** re-acquire a persisted element on the live tree (via the
+backend's re-find — an AT-SPI child-index path on Linux, or Name + ControlType on
+Windows) and run a semantic action on it. Payload keys:
+
+- `row_id` (required) — the matrix row to act on.
+- `snapshot_id` (optional) — defaults to the latest persisted snapshot.
+- `action` (optional, default `"invoke"`) — one of:
+  `invoke` / `click` / `press` (Action interface),
+  `set_text` (EditableText, needs `value`),
+  `toggle` / `check` (Action),
+  `select` (Selection or Action),
+  `set_value` (Value, needs a numeric `value`),
+  `expand` / `collapse` (Action).
+- `value` (optional) — the text or number for `set_text` / `set_value`. Folded
+  into `params` for the backend.
+- `params` (optional) — extra action parameters passed through to the backend.
+
+**Coordinate / raw-input forms** bypass the accessibility tree and synthesize
+input. They are best-effort and platform-dependent (X11 XTEST via `Atspi`, or the
+`ydotool` CLI on Wayland). No `row_id` / `snapshot_id` is needed:
+
+- `{"action":"click_point","x":<int>,"y":<int>,"button":"left|right|middle","double":false}`
+- `{"action":"type","value":"<text>"}`
+- `{"action":"key","value":"ctrl+s"}`
+
+Element-action request:
 
 ```json
-{"msg_id":"6","operation":"invoke_action","payload":{"snapshot_id":1,"row_id":1}}
+{"msg_id":"6","operation":"invoke_action","payload":{"snapshot_id":1,"row_id":7,"action":"set_text","value":"hello"}}
+```
+
+Coordinate-action request:
+
+```json
+{"msg_id":"6","operation":"invoke_action","payload":{"action":"click_point","x":420,"y":260}}
 ```
 
 Success payload (on a host that can perform the action):
 
 ```json
-{"success": true, "new_epoch": 2, "affected_rows": [1]}
+{"success": true, "action": "set_text", "new_epoch": 2, "affected_rows": [7]}
+```
+
+Coordinate forms return only `success` and `action`:
+
+```json
+{"success": true, "action": "click_point"}
 ```
 
 If the element is found but the action could not be performed:
 
 ```json
-{"success": false}
+{"success": false, "action": "set_text"}
 ```
 
-On a host that cannot perform live invocation:
+On a host that cannot perform the action, error `1006` (`UIA_ACCESS_DENIED`) is
+returned with a `reason` of `capture_unavailable` (no usable backend),
+`reacquire_failed` (element could not be re-found on the live tree),
+`action_unsupported` (the element does not support the requested action), or
+`synthetic_input_unavailable` (no XTEST/ydotool path for a coordinate form):
 
 ```json
 {
@@ -261,8 +300,8 @@ On a host that cannot perform live invocation:
     "code": 1006,
     "message": "UIA_ACCESS_DENIED",
     "details": {
-      "reason": "uia_unavailable",
-      "detail": "Live UIA invoke_action requires Windows 10/11 with the 'uiautomation' package (pip install -e '.[uia]'). This host cannot perform live capture."
+      "reason": "reacquire_failed",
+      "detail": "Could not re-acquire element row 7 on the live tree (it may have moved, closed, or the snapshot is stale). Re-run build_matrix and retry."
     }
   }
 }
