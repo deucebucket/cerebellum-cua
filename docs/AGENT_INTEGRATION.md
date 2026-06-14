@@ -511,3 +511,63 @@ environment:
 Equivalently, use `"command": "python"` with
 `"args": ["-m", "cerebellum_cua.mcp", "--db-dsn", "./matrix.db", "--secret", "${JWT_SECRET}"]`.
 Once registered, the agent sees the five tools above and calls them by name.
+
+## Driving an elevation prompt as part of a task
+
+Some tasks cross a privilege boundary — installing a package, restarting a
+service, editing a protected file. The OS answers with an elevation prompt:
+
+- **Linux (GUI):** a polkit "Authentication Required" dialog.
+- **Linux (terminal):** an interactive `sudo` password prompt.
+- **Windows:** the User Account Control (UAC) consent dialog.
+
+To the agent, a polkit dialog is just another UI dialog — it has a password
+field and an Authenticate button, so it is driven with the same layers as any
+other window (`build_matrix` → find the field → `invoke_action` `set_text` →
+click Authenticate). The `elevate` operation packages this:
+
+```json
+{"operation": "elevate", "payload": {"method": "auto"}}
+```
+
+`auto` drives a visible polkit dialog; for a terminal command, pass
+`{"method": "sudo", "command": ["systemctl", "restart", "foo"]}`.
+
+### Where the password comes from
+
+The elevation password is **never** passed in the request. It is read only from
+the `CEREBELLUM_ELEVATION_PASSWORD` environment variable, falling back to a
+`.env` file. This keeps the credential out of the agent's transcript, the
+protocol stream, logs, and any returned string. The response carries only a
+redacted `detail` and a `needs_human` flag.
+
+If the password is not configured, `elevate` returns
+`{"success": false, "needs_human": true, "detail": "no elevation password
+configured (set CEREBELLUM_ELEVATION_PASSWORD in .env)"}`. A tutorial or agent
+flow should treat this as a deliberate pause point: prompt the human to supply
+the credential (or to complete the dialog themselves) rather than failing hard.
+
+### Windows UAC is honest about its limit
+
+UAC consent runs on the isolated **secure desktop**, which a normal process
+cannot capture or click. `method: "uac"` therefore always returns
+`needs_human: true` — the agent cannot type the password into a UAC prompt. A
+human must accept it, or the tool itself must run elevated / with `uiAccess`.
+This is a deliberate OS security boundary; the tool does not pretend otherwise.
+
+## Security note (elevation)
+
+The elevation password is a sensitive secret. The following are mandatory:
+
+- **Opt-in.** Elevation handling is off unless `CEREBELLUM_ELEVATION_PASSWORD`
+  is set. Leave it unset on any host where you do not want tasks answering
+  elevation prompts.
+- **Never commit `.env`.** Keep `.env` out of version control (it is in
+  `.gitignore`); it holds this credential plus the JWT secret and DB DSN.
+- **Never logged or echoed.** The password is written only to the polkit field's
+  `set_text` payload or the `sudo` child's stdin. It is never logged, never
+  passed as a command-line argument, and never included in any response —
+  `detail` strings are redacted.
+- **Least privilege.** Prefer a dedicated, narrowly-scoped account where
+  possible, and remove the credential from the environment when the task that
+  needs it is done.

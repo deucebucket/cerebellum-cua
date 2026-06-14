@@ -32,7 +32,9 @@ from cerebellum_cua.errors import MatrixUIError
 #: ``list_windows`` reads authoritative desktop window state from the WM,
 #: ``read_legend`` emits a compact code legend (token-saving shorthand) for a
 #: snapshot, ``annotate`` overlays set-of-marks element boxes onto a screenshot,
-#: and ``wireframe`` renders an ASCII layout map of a snapshot.
+#: ``wireframe`` renders an ASCII layout map of a snapshot, and ``elevate``
+#: answers a privilege-escalation prompt (polkit / sudo / UAC) using the
+#: password from the ``.env`` config (never accepted via the payload).
 OPERATIONS = (
     "build_matrix",
     "get_element",
@@ -46,6 +48,7 @@ OPERATIONS = (
     "read_legend",
     "annotate",
     "wireframe",
+    "elevate",
 )
 
 UNKNOWN_OPERATION_CODE = 9999

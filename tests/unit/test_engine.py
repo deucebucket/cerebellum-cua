@@ -399,6 +399,7 @@ def test_handlers_dict_exposes_operations(engine: CuaEngine) -> None:
         "read_legend",
         "annotate",
         "wireframe",
+        "elevate",
     }
 
 
