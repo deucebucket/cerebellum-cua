@@ -54,6 +54,7 @@ class OperationHandlers:
             "invoke_action": self.invoke_action,
             "get_snapshot_diff": self.get_snapshot_diff,
             "screenshot": self.screenshot,
+            "read_text": self.read_text,
         }
 
     # --- build_matrix ----------------------------------------------------
@@ -195,6 +196,33 @@ class OperationHandlers:
             raise UIAAccessDeniedError(
                 reason="screenshot_unavailable", detail=str(exc)
             ) from exc
+
+    # --- read_text (aggregate on-screen text + coords) ------------------
+    def read_text(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Aggregate every on-screen text run + its bbox from a snapshot.
+
+        Reads from storage (no live capture), so it works for any backend: AT-SPI
+        elements carry exact text in ``properties["text_content"]`` while vision
+        elements carry OCR text in ``name``. Payload: ``{snapshot_id?: int}``
+        (default latest). Returns ``{"texts": [{"row_id", "text",
+        "bbox":[left,top,width,height]}], "count": int}`` for every element that
+        has visible text, preferring ``text_content`` over ``name``.
+        """
+        snapshot_id = self._snapshot_id(payload)
+        texts: list[dict[str, Any]] = []
+        for element in self._engine.storage.get_all_elements(snapshot_id):
+            text = element.properties.get("text_content") or element.name
+            if not text:
+                continue
+            rect = element.bounding_rect
+            texts.append(
+                {
+                    "row_id": element.row_id,
+                    "text": text,
+                    "bbox": [rect.left, rect.top, rect.width, rect.height],
+                }
+            )
+        return {"texts": texts, "count": len(texts)}
 
     # --- get_snapshot_diff (in-memory epoch history) ---------------------
     def get_snapshot_diff(self, payload: dict[str, Any]) -> dict[str, Any]:

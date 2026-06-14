@@ -60,6 +60,10 @@ class StorageBackend(ABC):
         """Fetch a single hydrated element by its dense row_id."""
 
     @abstractmethod
+    def get_all_elements(self, snapshot_id: int) -> list[Element]:
+        """Return every element in a snapshot, ordered by row_id (no semantics)."""
+
+    @abstractmethod
     def get_children(self, snapshot_id: int, parent_row_id: int) -> list[Element]:
         """Return direct children of ``parent_row_id`` ordered by row_id."""
 

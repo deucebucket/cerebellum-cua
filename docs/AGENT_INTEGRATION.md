@@ -39,6 +39,37 @@ Omit `path` to have a temp file created and its path returned. On a host with no
 screenshot tool installed the call returns error `1006` with a `reason` of
 `screenshot_unavailable` (see [PROTOCOL.md](PROTOCOL.md)).
 
+## Reading on-screen text with positions
+
+To read all the text currently on screen, with coordinates, in one cheap call:
+run `build_matrix` to capture a snapshot, then `read_text` to aggregate every
+text run plus its bounding box. `read_text` reads from storage (the snapshot you
+just built), not the live tree, so no second capture is needed.
+
+```jsonl
+→ {"msg_id":"1","operation":"build_matrix","payload":{"target":{"app_name":"konsole"}}}
+← {"msg_id":"1","type":"response","operation":"build_matrix","payload":{"snapshot_id":1,...},"error":null}
+→ {"msg_id":"2","operation":"read_text","payload":{"snapshot_id":1}}
+← {"msg_id":"2","type":"response","operation":"read_text","payload":{"texts":[{"row_id":1,"text":"$ ls\nfile.txt","bbox":[5,30,600,400]}],"count":1},"error":null}
+```
+
+Each entry has `row_id`, `text`, and `bbox` (`[left, top, width, height]` in
+screen pixels). Omit `snapshot_id` to read the latest snapshot.
+
+The source of the text depends on the capture backend:
+
+- **AT-SPI (Linux)** gives exact text. Elements that support the `Text` interface
+  (terminals, editors, documents) carry their full buffer in
+  `properties.text_content` (capped at `text_content_max_chars`, default 4000);
+  other elements fall back to their `name`. This is what makes a Konsole's
+  contents readable verbatim and cheaply — text and coordinates only, no pixels.
+- **Vision (screenshot + OCR)** gives OCR text. Vision elements store their
+  recognized text in `name`, so `read_text` returns it the same way.
+
+Because `read_text` returns text plus coordinates only, it stays far below the
+token cost of a screenshot while remaining directly actionable: feed a `bbox`
+center to `invoke_action`'s `click_point` to act on what you read.
+
 ## (a) As a subprocess over JSONL stdio
 
 Launch the engine as a child process and exchange JSONL lines with it. This works

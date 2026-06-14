@@ -145,6 +145,13 @@ class SQLiteBackend(StorageBackend):
         el.semantics = self.get_semantic_concepts(snapshot_id, row_id)
         return el
 
+    def get_all_elements(self, snapshot_id: int) -> list[Element]:
+        rows = self.conn.execute(
+            "SELECT * FROM elements WHERE snapshot_id = ? ORDER BY matrix_row_id",
+            (snapshot_id,),
+        ).fetchall()
+        return [rm.row_to_element(r) for r in rows]
+
     def get_children(self, snapshot_id: int, parent_row_id: int) -> list[Element]:
         rows = self.conn.execute(
             """SELECT e.* FROM elements e

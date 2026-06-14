@@ -50,7 +50,8 @@ The error object is:
 ## Operations
 
 There are five core operations: `build_matrix`, `get_element`, `load_children`,
-`invoke_action`, `get_snapshot_diff`, plus one opt-in extension, `screenshot`.
+`invoke_action`, `get_snapshot_diff`, plus two extensions: `screenshot` (opt-in
+on-demand visual capture) and `read_text` (aggregate on-screen text + coords).
 An unknown operation returns code `9999`.
 
 ### build_matrix
@@ -155,6 +156,21 @@ Response:
 The `relationships` list is present only when `include_relationships` is true.
 Each relationship has `to_row_id`, `code` (the `RelationshipCode` value),
 `weight`, and `metadata`.
+
+The `properties` dict carries the element's state flags, and for elements that
+support the AT-SPI `Text` interface (terminals, editors, documents) it also
+carries the element's exact text:
+
+- `text_content` — the element's full text buffer, captured at build time and
+  capped at `text_content_max_chars` chars (default 4000, set in the build
+  `config`). Present only when the element exposes `Text`/`EditableText` and has a
+  non-empty buffer.
+- `text_truncated` — `true` when the buffer exceeded the cap and was clipped.
+  Absent otherwise.
+- `caret_offset` — the integer caret position within the buffer, when the toolkit
+  reports one.
+
+These are populated by the AT-SPI backend; the UIA backend does not set them.
 
 ### load_children
 
@@ -433,6 +449,51 @@ call returns error `1006` (`UIA_ACCESS_DENIED`) with a `reason` of
   }
 }
 ```
+
+### read_text
+
+Aggregates every on-screen text run, with its bounding box, from a stored
+snapshot. It reads from storage only (no live capture), so it works for any
+backend: AT-SPI elements carry exact text in `properties.text_content`, while
+vision elements carry OCR text in `name`. For each element with visible text it
+returns one entry, preferring `text_content` over `name`.
+
+Payload key (optional):
+
+- `snapshot_id` — the snapshot to read. When omitted the engine uses the latest
+  persisted snapshot.
+
+Each returned text entry has `row_id`, `text`, and `bbox` (a
+`[left, top, width, height]` array in screen pixels). The response is compact by
+design — text and coordinates only, never pixels.
+
+Request:
+
+```json
+{"msg_id":"11","operation":"read_text","payload":{"snapshot_id":1}}
+```
+
+Response:
+
+```json
+{
+  "msg_id": "11",
+  "type": "response",
+  "operation": "read_text",
+  "payload": {
+    "texts": [
+      {"row_id": 1, "text": "$ ls\nfile.txt", "bbox": [5, 30, 600, 400]},
+      {"row_id": 2, "text": "Status: ready", "bbox": [5, 440, 200, 18]}
+    ],
+    "count": 2
+  },
+  "error": null
+}
+```
+
+When no snapshot has been persisted yet, the call returns error `1001`
+(`SNAPSHOT_NOT_FOUND`). When the snapshot exists but nothing has text, `texts` is
+empty and `count` is `0`.
 
 ## Token accounting
 
