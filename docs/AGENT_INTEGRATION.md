@@ -70,6 +70,61 @@ Because `read_text` returns text plus coordinates only, it stays far below the
 token cost of a screenshot while remaining directly actionable: feed a `bbox`
 center to `invoke_action`'s `click_point` to act on what you read.
 
+## Full control surface: click, drag, scroll, type, key
+
+`invoke_action` covers the complete set of pointer/keyboard primitives an agent
+needs to drive a GUI without a screenshot loop. Element actions (re-acquired by
+`row_id`) run a semantic action; coordinate forms synthesize raw input:
+
+- `click_point` — click at `(x, y)` (`button`, `double` optional).
+- `drag` — press at `(x, y)`, glide to `(x2, y2)` with the button held, release.
+  Use for sliders, selections, drag-and-drop, and canvas gestures.
+- `scroll` — wheel at `(x, y)` by `dx`/`dy` (positive `dy` = down). Use to bring
+  off-screen content into view, then re-`build_matrix` to capture it.
+- `type` — type `value` into whatever has focus.
+- `key` — send a combo like `"ctrl+s"`.
+
+See [PROTOCOL.md](PROTOCOL.md) for the exact payloads.
+
+## Act, then verify: confirming an action landed
+
+A driving agent cannot see the screen, so after acting it must decide whether the
+action actually did anything. `invoke_action` has an opt-in verification step that
+answers this from the matrix — no screenshot required.
+
+Enable it per-call with `"verify": true` in the payload (or globally with
+`CuaEngine(..., verify_actions=True)`; a payload value overrides the engine
+default). After a **successful** action the engine re-captures the same target it
+last built and diffs it against the pre-action tree, then adds to the response:
+
+- `verified` — `true` if the UI observably changed, `false` if nothing changed,
+  `null` if re-capture was not possible.
+- `effect` — `"changed"` / `"no_change"` / `"unknown"`.
+- `observed_change` — compact `added_row_ids` / `removed_row_ids` /
+  `modified_row_ids` lists (present when `verified` is a boolean).
+- `reason` — why verification could not run (present when `verified` is `null`).
+
+```jsonl
+→ {"msg_id":"5","operation":"invoke_action","payload":{"row_id":7,"action":"click","verify":true}}
+← {"msg_id":"5","type":"response","operation":"invoke_action","payload":{"success":true,"verified":true,"effect":"changed","observed_change":{"added_row_ids":[12],"removed_row_ids":[],"modified_row_ids":[4]}},"error":null}
+```
+
+The act-then-verify pattern in practice:
+
+1. Act with `"verify": true`.
+2. If `effect` is `"changed"`, the action landed — proceed (the row-id lists tell
+   you what moved; `build_matrix` again or `get_element` to inspect the new rows).
+3. If `effect` is `"no_change"`, the action had no observable effect — this is
+   **not** an error. Retry, target a different element, or fall back to a
+   coordinate form.
+4. If `verified` is `null`, verification could not run (headless host, no backend,
+   or no prior `build_matrix`); treat the action result on its own and verify
+   manually if needed.
+
+Verification reuses the normal capture path and the `get_snapshot_diff` logic, so
+it costs roughly one extra `build_matrix`. Leave it off (the default) for actions
+whose effect you do not need to confirm, or when minimizing capture overhead.
+
 ## (a) As a subprocess over JSONL stdio
 
 Launch the engine as a child process and exchange JSONL lines with it. This works
@@ -173,9 +228,9 @@ work against any persisted or seeded snapshot.
 
 ### Human-visible motion and the user-takeover kill-switch
 
-Coordinate / raw-input actions (`click_point`, `type`, `key`) drive the pointer
-in a human-observable way and can be cancelled the instant a real person takes
-over.
+Coordinate / raw-input actions (`click_point`, `drag`, `scroll`, `type`, `key`)
+drive the pointer in a human-observable way and can be cancelled the instant a
+real person takes over. (`scroll` is a discrete wheel event with no glide.)
 
 **Motion profile.** `SyntheticInput` glides the cursor to the target along an
 ease-in-out path and decomposes a click into move → settle → press → hold →

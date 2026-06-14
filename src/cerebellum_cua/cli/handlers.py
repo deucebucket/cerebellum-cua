@@ -86,6 +86,7 @@ class OperationHandlers:
                 detail=_NO_CAPTURE.format(kind=kind),
             ) from exc
         snapshot_id = eng.persist(snapshot)
+        eng.record_capture(target, config, kind)
         self._enrich_semantics(snapshot, snapshot_id)
         return self._build_result(snapshot, snapshot_id)
 
@@ -161,15 +162,32 @@ class OperationHandlers:
 
         Element forms take ``row_id`` (+ optional ``snapshot_id``), an ``action``
         (default ``"invoke"``), and optional ``value``/``params``. Coordinate forms
-        are ``{"action":"click_point","x","y"}``, ``{"action":"type","value"}``, and
-        ``{"action":"key","value"}``. On an unavailable backend, a failed
-        re-acquire, or an unsupported action, a typed
+        are ``{"action":"click_point","x","y"}``, ``{"action":"drag","x","y","x2",
+        "y2"}``, ``{"action":"scroll","x","y","dx","dy"}``, ``{"action":"type",
+        "value"}``, and ``{"action":"key","value"}``. On an unavailable backend, a
+        failed re-acquire, or an unsupported action, a typed
         :class:`~cerebellum_cua.errors.UIAAccessDeniedError` (code 1006) is raised — never a
         bare crash.
+
+        When verification is enabled (engine ``verify_actions`` or payload
+        ``"verify": true``) the tree is re-captured afterward and the response
+        gains ``verified`` / ``effect`` / ``observed_change`` (or ``verified``
+        null + ``reason`` if re-capture was impossible). See
+        :mod:`cerebellum_cua.cli.verify`.
         """
         from cerebellum_cua.cli.invoke import perform_action  # noqa: PLC0415 - lazy
+        from cerebellum_cua.cli.verify import (  # noqa: PLC0415 - lazy
+            should_verify,
+            verify_action,
+        )
 
-        return perform_action(self._engine, payload)
+        eng = self._engine
+        verify = should_verify(eng, payload)
+        before = eng.snapshots_latest() if verify else None
+        result = perform_action(eng, payload)
+        if verify and result.get("success"):
+            result.update(verify_action(eng, before))
+        return result
 
     # --- screenshot (opt-in on-demand visual capture) -------------------
     def screenshot(self, payload: dict[str, Any]) -> dict[str, Any]:
