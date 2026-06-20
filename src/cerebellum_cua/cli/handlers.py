@@ -48,6 +48,57 @@ _NO_CAPTURE = (
 )
 
 
+def _empty_capture_diagnostics(snapshot: Snapshot, backend: str | None) -> dict[str, Any]:
+    """Explain a 0-element capture so it isn't mistaken for a blank screen.
+
+    Uses the backend's per-capture diagnostics (how many application roots the
+    registry exposed vs. matched the target) to pick an accurate reason: an empty
+    a11y registry, a target that matched no app, or roots that yielded no
+    elements — each with concrete remediation.
+    """
+    diag = snapshot.metadata.get("capture_diagnostics") or {}
+    info: dict[str, Any] = {"empty": True, "capture_backend": backend}
+    if backend == "atspi":
+        apps = diag.get("registry_app_count")
+        matched = diag.get("matched_root_count")
+        if apps == 0:
+            info["reason"] = "atspi_registry_empty"
+            info["hint"] = (
+                "The AT-SPI accessibility registry exposed 0 applications, so there "
+                "was nothing to capture. This almost always means apps are not "
+                "publishing their a11y trees — not that the screen is empty. On "
+                "Qt/KDE export QT_ACCESSIBILITY=1 before launching apps; ensure "
+                "at-spi2-core is running and that apps were STARTED AFTER the a11y "
+                "bus; Wayland apps must support accessibility. See "
+                "scripts/setup-linux.sh and docs/INSTALL.md."
+            )
+        elif matched == 0 and apps:
+            info["reason"] = "no_root_matched_target"
+            info["hint"] = (
+                f"The registry exposed {apps} application(s) but none matched the "
+                "requested target. Relax the target (app_name/pid/title_regex) or "
+                "pass an empty target to capture the whole desktop; call "
+                "list_windows to see what is open."
+            )
+        else:
+            info["reason"] = "all_elements_filtered"
+            info["hint"] = (
+                f"{matched} application root(s) were walked but produced no "
+                "elements — they may expose no accessible content, or the "
+                "depth/visibility filter excluded everything. Try a larger "
+                "config.max_depth, or the screenshot/vision path for "
+                "non-accessible UIs."
+            )
+    else:
+        info["reason"] = "no_elements"
+        info["hint"] = (
+            "Capture succeeded but produced 0 elements — the target may expose no "
+            "accessible content. Verify the target, or use the 'screenshot'/"
+            "'vision' path for custom-drawn or canvas UIs."
+        )
+    return info
+
+
 class OperationHandlers:
     """Bundle of the five operation handlers closed over a :class:`CuaEngine`."""
 
@@ -160,18 +211,24 @@ class OperationHandlers:
             for e in snapshot.elements
             if int(e.metadata.get("depth", 0) or 0) <= 1
         ]
-        return {
+        backend = backend_used or snapshot.metadata.get("capture_backend")
+        result: dict[str, Any] = {
             "snapshot_id": snapshot_id,
             "epoch": snapshot.epoch,
             "total_elements": snapshot.total_elements,
             "build_duration_ms": snapshot.build_duration_ms,
             "degraded_branches": snapshot.degraded_branches,
             "root_elements": roots,
-            "capture_backend": backend_used
-            or snapshot.metadata.get("capture_backend"),
+            "capture_backend": backend,
             "degraded": degraded,
             "status": "success",
         }
+        if snapshot.total_elements == 0:
+            # A 0-element capture is rarely a genuinely empty screen — far more
+            # often the a11y tree is exposing nothing. Surface a cause + remedy so
+            # the agent doesn't read it as "the screen is blank" (issue follow-up).
+            result["diagnostics"] = _empty_capture_diagnostics(snapshot, backend)
+        return result
 
     def _enrich_semantics(self, snapshot: Snapshot, snapshot_id: int) -> None:
         """Match every element and write its concepts into the link table."""

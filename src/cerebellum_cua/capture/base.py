@@ -114,6 +114,16 @@ class CaptureBackend(ABC):
         backend cannot run here.
         """
 
+    def last_capture_diagnostics(self) -> dict[str, Any] | None:
+        """Optional diagnostics about the MOST RECENT ``iter_tree`` call.
+
+        Lets a backend explain WHY a capture came back empty (e.g. how many
+        application roots the accessibility registry exposed vs. how many matched
+        the target) so a 0-element result can be reported as empty-with-cause
+        rather than a silent success. Default ``None``; backends may override.
+        """
+        return None
+
     def reacquire(self, identity: dict[str, Any]) -> CapturedElement | None:
         """Re-find a live element from a persisted identity (post-DB round-trip).
 
