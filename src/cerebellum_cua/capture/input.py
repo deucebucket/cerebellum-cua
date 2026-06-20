@@ -8,14 +8,16 @@ guarantee that the right thing is hit.
 
 Strategy, display-server aware:
 
-* Try ``Atspi.generate_mouse_event`` / ``Atspi.generate_keyboard_event`` first.
-  These work under X11 (via XTEST) but are no-ops or unavailable under most
-  Wayland compositors.
-* On Wayland (``XDG_SESSION_TYPE=wayland``) or when the Atspi route is
-  unavailable/fails, fall back to the ``ydotool`` CLI if it is on ``PATH``
-  (argv builders live in :mod:`cerebellum_cua.capture._ydotool`). ``ydotool``
-  needs its daemon (``ydotoold``) running and uinput permissions.
-* If neither method is available, raise :class:`SyntheticInputError`.
+* A **CLI tool** is the default: ``xdotool`` on X11, ``ydotool`` on Wayland
+  (argv builders live in :mod:`cerebellum_cua.capture._xdotool` /
+  :mod:`._ydotool`). ``ydotool`` needs its daemon (``ydotoold``) + uinput;
+  ``xdotool`` needs an X11/Xwayland display. The tool is chosen by display
+  server and PATH at construction.
+* ``Atspi.generate_*_event`` (XTEST) is **opt-in only** (``use_atspi_input`` /
+  ``CEREBELLUM_ATSPI_INPUT=1``): it aborts the whole process at the C level when
+  the a11y registry is broken (issue #54), and coordinate/raw input never needs
+  the a11y tree, so it is not used by default.
+* If no method is available, raise :class:`SyntheticInputError` (catchable).
 
 **Motion profile.** Actions are human-observable by default: the cursor *glides*
 to the target along an ease-in-out path over ``move_duration`` seconds across
@@ -37,6 +39,7 @@ import time
 
 from cerebellum_cua.capture._atspi_input import AtspiInputMixin
 from cerebellum_cua.capture._motion import interpolate_path
+from cerebellum_cua.capture._xdotool import XdotoolInputMixin
 from cerebellum_cua.capture._ydotool import (
     SyntheticInputError,
     YdotoolInputMixin,
@@ -53,7 +56,7 @@ def _aborted(abort: threading.Event | None) -> bool:
     return abort is not None and abort.is_set()
 
 
-class SyntheticInput(AtspiInputMixin, YdotoolInputMixin):
+class SyntheticInput(AtspiInputMixin, XdotoolInputMixin, YdotoolInputMixin):
     """Best-effort, human-paced synthetic mouse/keyboard input.
 
     Motion is tunable via the constructor:
@@ -94,6 +97,9 @@ class SyntheticInput(AtspiInputMixin, YdotoolInputMixin):
         self._use_atspi_input = bool(use_atspi_input)
         # Kept for the dispatch gates below: ``not _prefer_ydotool`` == "use Atspi".
         self._prefer_ydotool = not self._use_atspi_input
+        # CLI input tool: ydotool (uinput, Wayland) or xdotool (X11). When ydotool
+        # is explicitly preferred, honour it; otherwise pick by display server.
+        self._cli_tool = self._pick_cli_tool(force_ydotool=prefer_ydotool is True)
         self.speed = speed
         self.move_duration = float(move_duration)
         self.steps = max(1, int(steps))
@@ -138,14 +144,14 @@ class SyntheticInput(AtspiInputMixin, YdotoolInputMixin):
         if self.instant or self.key_delay <= 0:
             if not self._prefer_ydotool and self._atspi_type(text):
                 return True
-            return self._ydotool(["type", "--", text])
+            return self._cli_type(text, 0)
         return self._paced_type(text, abort)
 
     def key(self, combo: str) -> bool:
         """Send a key combo like ``"ctrl+s"`` (modifiers joined with ``+``)."""
         if not self._prefer_ydotool and self._atspi_key(combo):
             return True
-        return self._ydotool_key(combo)
+        return self._cli_key(combo)
 
     def drag(
         self,
@@ -220,14 +226,14 @@ class SyntheticInput(AtspiInputMixin, YdotoolInputMixin):
         """Emit one absolute pointer move via the active backend."""
         if not self._prefer_ydotool and self._atspi_move(x, y):
             return True
-        return self._ydotool_move(x, y)
+        return self._cli_move(x, y)
 
     # --- clicks ----------------------------------------------------------
     def _atomic_click(self, x: int, y: int, button: str, double: bool) -> bool:
         """A single combined click (instant mode / no decomposition)."""
         if not self._prefer_ydotool and self._atspi_click(x, y, button, double):
             return True
-        return self._ydotool_click(button, double)
+        return self._cli_click(button, double)
 
     def _natural_click(
         self,
@@ -247,7 +253,7 @@ class SyntheticInput(AtspiInputMixin, YdotoolInputMixin):
             if double:
                 self._atspi_press_release(x, y, button)
             return True
-        return self._ydotool_click(button, double)
+        return self._cli_click(button, double)
 
     # --- paced typing ----------------------------------------------------
     def _paced_type(
@@ -267,47 +273,109 @@ class SyntheticInput(AtspiInputMixin, YdotoolInputMixin):
                 return True
         if _aborted(abort):
             raise AbortedByUser("user took over during typing")
-        delay_ms = str(int(self.key_delay * 1000))
-        return self._ydotool(["type", "--key-delay", delay_ms, "--", text])
+        return self._cli_type(text, int(self.key_delay * 1000))
 
     # --- press / release / wheel (shared by drag + scroll) ---------------
     def _press(self, x: int, y: int, button: str) -> bool:
         """Press and hold ``button`` at ``(x, y)`` via the active backend."""
         if not self._prefer_ydotool and self._atspi_press(x, y, button):
             return True
-        return self._ydotool_press(button)
+        return self._cli_press(button)
 
     def _release(self, x: int, y: int, button: str) -> bool:
         """Release a held ``button`` at ``(x, y)`` via the active backend."""
         if not self._prefer_ydotool and self._atspi_release(x, y, button):
             return True
-        return self._ydotool_release(button)
+        return self._cli_release(button)
 
     def _wheel(self, dx: int, dy: int) -> bool:
         """Emit one wheel event via the active backend (positive dy = down)."""
         if not self._prefer_ydotool and self._atspi_wheel(dx, dy):
             return True
-        return self._ydotool_wheel(dx, dy)
+        return self._cli_wheel(dx, dy)
 
-    # --- ydotool subprocess runner (argv builders live in _ydotool) ------
+    # --- CLI tool selection + dispatch (ydotool / xdotool) ---------------
+    @staticmethod
+    def _pick_cli_tool(force_ydotool: bool) -> str | None:
+        """Pick the CLI input tool: ydotool (uinput/Wayland) or xdotool (X11).
+
+        Honours an explicit ydotool preference; otherwise orders by display
+        server and returns whichever is installed (``None`` if neither).
+        """
+        if force_ydotool and shutil.which("ydotool") is not None:
+            return "ydotool"
+        wayland = (
+            os.environ.get("XDG_SESSION_TYPE", "").lower() == "wayland"
+            or bool(os.environ.get("WAYLAND_DISPLAY"))
+        )
+        order = ("ydotool", "xdotool") if wayland else ("xdotool", "ydotool")
+        for tool in order:
+            if shutil.which(tool) is not None:
+                return tool
+        return None
+
+    def _cli_move(self, x: int, y: int) -> bool:
+        return (self._xdotool_move(x, y) if self._cli_tool == "xdotool"
+                else self._ydotool_move(x, y))
+
+    def _cli_click(self, button: str, double: bool) -> bool:
+        return (self._xdotool_click(button, double) if self._cli_tool == "xdotool"
+                else self._ydotool_click(button, double))
+
+    def _cli_press(self, button: str) -> bool:
+        return (self._xdotool_press(button) if self._cli_tool == "xdotool"
+                else self._ydotool_press(button))
+
+    def _cli_release(self, button: str) -> bool:
+        return (self._xdotool_release(button) if self._cli_tool == "xdotool"
+                else self._ydotool_release(button))
+
+    def _cli_wheel(self, dx: int, dy: int) -> bool:
+        return (self._xdotool_wheel(dx, dy) if self._cli_tool == "xdotool"
+                else self._ydotool_wheel(dx, dy))
+
+    def _cli_key(self, combo: str) -> bool:
+        return (self._xdotool_key(combo) if self._cli_tool == "xdotool"
+                else self._ydotool_key(combo))
+
+    def _cli_type(self, text: str, delay_ms: int) -> bool:
+        if self._cli_tool == "xdotool":
+            return self._xdotool_type(text, delay_ms)
+        args = (["type", "--key-delay", str(delay_ms), "--", text] if delay_ms
+                else ["type", "--", text])
+        return self._ydotool(args)
+
+    # --- CLI subprocess runners (argv builders live in _ydotool/_xdotool) -
     @staticmethod
     def _ydotool(args: list[str]) -> bool:
         if shutil.which("ydotool") is None:
             raise SyntheticInputError(
-                "no synthetic-input method available: Atspi XTEST events failed or "
-                "are unsupported (Wayland) and the 'ydotool' CLI is not on PATH. "
-                "Install ydotool + run ydotoold, or use an X11 session."
+                "no synthetic-input method available: install 'ydotool' (+ run "
+                "ydotoold) for Wayland, or 'xdotool' for X11."
             )
-        try:
-            result = subprocess.run(
-                ["ydotool", *args], capture_output=True, text=True,
-                timeout=10, check=False,
-            )
-        except (OSError, subprocess.SubprocessError) as exc:
-            raise SyntheticInputError(f"ydotool invocation failed: {exc}") from exc
-        if result.returncode != 0:
+        return _run_input_tool("ydotool", args)
+
+    @staticmethod
+    def _xdotool(args: list[str]) -> bool:
+        if shutil.which("xdotool") is None:
             raise SyntheticInputError(
-                f"ydotool {args[0]} failed (exit {result.returncode}): "
-                f"{(result.stderr or '').strip()}"
+                "no synthetic-input method available: install 'xdotool' for X11, "
+                "or 'ydotool' (+ ydotoold) for Wayland."
             )
-        return True
+        return _run_input_tool("xdotool", args)
+
+
+def _run_input_tool(tool: str, args: list[str]) -> bool:
+    """Run ``tool`` with ``args`` as a guarded subprocess; raise on failure."""
+    try:
+        result = subprocess.run(
+            [tool, *args], capture_output=True, text=True, timeout=10, check=False,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise SyntheticInputError(f"{tool} invocation failed: {exc}") from exc
+    if result.returncode != 0:
+        raise SyntheticInputError(
+            f"{tool} {args[0]} failed (exit {result.returncode}): "
+            f"{(result.stderr or '').strip()}"
+        )
+    return True

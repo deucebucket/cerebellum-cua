@@ -245,3 +245,42 @@ def test_atspi_input_is_opt_in_via_env(monkeypatch: Any) -> None:
     monkeypatch.delenv("XDG_SESSION_TYPE", raising=False)
     si = SyntheticInput(speed="instant")
     assert si._prefer_ydotool is False  # Atspi route allowed when opted in
+
+
+# --- #54 part 2: xdotool X11 CLI path (no AT-SPI, no daemon) -------------------
+def _xdotool_only(monkeypatch: Any, rec: _Recorder) -> SyntheticInput:
+    import cerebellum_cua.capture.input as mod
+
+    monkeypatch.delenv("CEREBELLUM_ATSPI_INPUT", raising=False)
+    monkeypatch.setenv("XDG_SESSION_TYPE", "x11")
+    monkeypatch.setattr(
+        mod.shutil, "which", lambda n: "/usr/bin/xdotool" if n == "xdotool" else None)
+    monkeypatch.setattr(mod.subprocess, "run", rec.run)
+    return SyntheticInput(speed="instant")
+
+
+def test_xdotool_click_builds_mousemove_then_click(monkeypatch: Any) -> None:
+    rec = _Recorder()
+    si = _xdotool_only(monkeypatch, rec)
+    assert si.click(15, 25) is True
+    assert ["xdotool", "mousemove", "15", "25"] in rec.calls
+    assert ["xdotool", "click", "1"] in rec.calls
+
+
+def test_xdotool_key_uses_plus_syntax(monkeypatch: Any) -> None:
+    rec = _Recorder()
+    si = _xdotool_only(monkeypatch, rec)
+    assert si.key("ctrl+s") is True
+    assert ["xdotool", "key", "ctrl+s"] in rec.calls
+
+
+def test_no_cli_tool_and_no_atspi_raises_clean_error(monkeypatch: Any) -> None:
+    import cerebellum_cua.capture.input as mod
+    from cerebellum_cua.capture.input import SyntheticInputError
+
+    monkeypatch.delenv("CEREBELLUM_ATSPI_INPUT", raising=False)
+    monkeypatch.setenv("XDG_SESSION_TYPE", "x11")
+    monkeypatch.setattr(mod.shutil, "which", lambda _n: None)  # no tools at all
+    si = SyntheticInput(speed="instant")
+    with pytest.raises(SyntheticInputError):
+        si.click(1, 2)
