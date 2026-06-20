@@ -454,24 +454,39 @@ Arguments:
 
 ### Registered tools
 
-The server registers five tools, one per operation. Each takes the operation's
-payload fields as typed arguments (see [PROTOCOL.md](PROTOCOL.md)) and returns
-the operation's response payload as a dict. A domain error is returned as a
-structured `{"error": {"code", "message", "details"}}` dict rather than raised.
+The server exposes **every engine operation as a tool — full parity with the
+JSONL protocol**, so an MCP agent sees the whole capability (perceive, read, act,
+visually ground), not a capture/diff subset. Each tool takes the operation's
+payload fields as typed arguments (see [PROTOCOL.md](PROTOCOL.md)) and returns the
+operation's response payload as a dict. A domain error is returned as a structured
+`{"error": {"code", "message", "details"}}` dict rather than raised. Each tool's
+description teaches where it fits in the perceive → drill-in → act loop, so an
+agent can use the tool from its description alone.
 
-| Tool                | Arguments                                                                                          |
-|---------------------|----------------------------------------------------------------------------------------------------|
-| `build_matrix`      | `target`, `config`, `capture_backend`                                                              |
-| `get_element`       | `row_id`, `snapshot_id`, `include_relationships`, `include_semantics`, `include_children_stub`     |
-| `load_children`     | `parent_row_id`, `snapshot_id`, `lazy_token`, `max_depth`, `include_properties`, `include_semantics` |
-| `invoke_action`     | `row_id`, `snapshot_id`                                                                            |
-| `get_snapshot_diff` | `from_epoch`, `to_epoch`                                                                           |
+| Tool                | Role | Key arguments |
+|---------------------|------|----------------|
+| `list_windows`      | perceive (cheap) | `backend` |
+| `build_matrix`      | perceive (capture) | `target`, `config`, `capture_backend` |
+| `get_element`       | read | `row_id`, `snapshot_id`, `include_relationships`, `include_semantics`, `include_children_stub` |
+| `load_children`     | read (drill in) | `parent_row_id`, `snapshot_id`, `lazy_token`, `max_depth`, `include_properties`, `include_semantics` |
+| `read_text`         | read | `snapshot_id` |
+| `read_legend`       | read (compact) | `snapshot_id` |
+| `wireframe`         | read (layout) | `snapshot_id` |
+| `get_snapshot_diff` | read (changes) | `from_epoch`, `to_epoch` |
+| `invoke_action`     | act | `row_id`, `snapshot_id`, `action`, `value`, `params`, `x`, `y`, `x2`, `y2`, `dx`, `dy`, `button`, `double`, `verify` |
+| `run_skill`         | act (high-level) | `skill`, `args`, `snapshot_id`, `capture`, `target` |
+| `screenshot`        | visual | `path`, `display` |
+| `annotate`          | visual (set-of-marks) | `snapshot_id`, `path`, `out_path`, `display` |
+| `elevate`           | privilege | `method`, `command` |
 
-`build_matrix` and `invoke_action` require a live capture backend (Windows UIA,
-Linux AT-SPI, or the screenshot-based vision backend); on a host without one they
-return the structured `1006` error, matching the JSONL behavior. The read paths
-(`get_element`, `load_children`, `get_snapshot_diff`) work against any persisted
-or seeded snapshot.
+`invoke_action` supports both element actions (`row_id` + `action`/`value`) and
+coordinate / raw-input forms (`click_point`, `drag`, `scroll`, `type`, `key`) —
+the same full control surface as JSONL. The capture/act tools (`build_matrix`,
+`invoke_action`, `screenshot`, `annotate`, `run_skill`) require a live backend
+(Windows UIA, Linux AT-SPI, or the screenshot-based vision backend); on a host
+without one they return the structured `1006` error. The read paths
+(`get_element`, `load_children`, `read_text`, `read_legend`, `wireframe`,
+`get_snapshot_diff`) work against any persisted or seeded snapshot.
 
 ### Choosing or forcing a capture backend
 

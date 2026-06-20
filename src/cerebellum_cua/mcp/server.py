@@ -1,10 +1,10 @@
-"""Builds an MCP server exposing the five operations, backed by one engine.
+"""Builds an MCP server exposing every engine operation, backed by one engine.
 
 ``build_server`` constructs a single :class:`~cerebellum_cua.cli.engine.CuaEngine`
-and registers the five operations as MCP tools via the adapters in
-:mod:`._tools`. Every tool routes to ``engine.handlers[op]`` — no operation logic
-is reimplemented here. ``run_stdio`` runs the resulting server over the stdio
-transport.
+and registers all operations in :data:`._tools.TOOL_BUILDERS` as MCP tools (at
+parity with the JSONL protocol). Every tool routes to ``engine.handlers[op]`` —
+no operation logic is reimplemented here. ``run_stdio`` runs the resulting server
+over the stdio transport.
 
 The ``mcp`` package is imported lazily inside :func:`build_server`; when it is
 absent a clear, typed error is raised pointing at ``pip install -e '.[mcp]'``, so
@@ -43,7 +43,7 @@ def _load_fastmcp() -> type[FastMCP]:
 
 
 def build_server(db_dsn: str | None, secret: str, **engine_kwargs: Any) -> FastMCP:
-    """Return a ``FastMCP`` server with the five operations registered as tools.
+    """Return a ``FastMCP`` server with every engine operation registered as a tool.
 
     The server owns one ``CuaEngine`` (constructed from ``db_dsn`` / ``secret``
     plus any forwarded ``engine_kwargs`` such as ``max_response_tokens``). The

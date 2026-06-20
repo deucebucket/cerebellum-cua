@@ -34,6 +34,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Tutorial generation (scripted steps + on-screen captions). (#35)
 
 ### Changed
+- **MCP server now exposes every engine operation at parity with JSONL** (13
+  tools, up from 5): adds `list_windows`, `screenshot`, `read_text`, `run_skill`,
+  `read_legend`, `wireframe`, `annotate`, and `elevate`, and expands
+  `invoke_action` to the full control surface (coordinate `click_point`/`drag`/
+  `scroll`/`type`/`key` and `verify`, not just `row_id`). Every tool now carries a
+  workflow-oriented description (previously the registered descriptions were
+  empty), so an agent can use the surface without reading external docs.
 - **UIA backend ported to the real `uiautomation` library API** (was written
   against raw IUIAutomation COM that does not exist in the library). **Validated
   on real Windows 11**: captures the live interactive desktop (184 elements,

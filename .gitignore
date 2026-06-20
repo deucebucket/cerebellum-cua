@@ -22,6 +22,9 @@ htmlcov/
 *.db-shm
 state.db
 
+# Rig runtime artifacts (recordings, screenshots, scratch DBs)
+rig/out/
+
 # Secrets / env
 .env
 *.secret
