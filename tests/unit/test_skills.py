@@ -387,3 +387,32 @@ def test_click_reraises_non_reacquire_errors(
     engine.handlers["invoke_action"] = _fake
     with pytest.raises(UIAAccessDeniedError):
         click(engine, name="Save")
+
+
+def test_type_into_falls_back_when_set_text_reacquire_raises(
+    engine: CuaEngine, monkeypatch: Any
+) -> None:
+    # set_text can RAISE reacquire_failed (not just return success=False); the
+    # skill must still recover via click-then-type rather than propagating.
+    from cerebellum_cua.errors import UIAAccessDeniedError
+
+    calls: list[dict[str, Any]] = []
+
+    def _fake(payload: dict[str, Any]) -> dict[str, Any]:
+        calls.append(dict(payload))
+        action = payload.get("action")
+        if action == "set_text":
+            raise UIAAccessDeniedError(reason="reacquire_failed", detail="gone")
+        if action == "click":
+            # the focus click also can't re-acquire -> coordinate fallback
+            raise UIAAccessDeniedError(reason="reacquire_failed", detail="gone")
+        return {"success": True, "action": action}
+
+    engine.register_seed(_form_snapshot())
+    engine.handlers["invoke_action"] = _fake
+    result = type_into(engine, "robust text", role="EDIT")
+    assert result["success"] is True
+    actions = [c["action"] for c in calls]
+    # set_text raises -> click raises -> click_point (coord fallback) -> type
+    assert actions == ["set_text", "click", "click_point", "type"]
+    assert calls[-1]["value"] == "robust text"

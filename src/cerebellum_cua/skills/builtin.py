@@ -163,12 +163,19 @@ def type_into(engine: CuaEngine, value: str, **query: Any) -> dict[str, Any]:
     snapshot_id, element = _resolve(engine, query)
     if element is None:
         return _not_found("type_into", query)
-    result = _invoke(
-        engine, "type_into", snapshot_id, element, "set_text", value=value
-    )
+    try:
+        result = _invoke(
+            engine, "type_into", snapshot_id, element, "set_text", value=value
+        )
+    except UIAAccessDeniedError as exc:
+        # set_text could not re-acquire the field; fall through to the
+        # focus-then-type path (its click recovers via coordinates).
+        if exc.details.get("reason") != "reacquire_failed":
+            raise
+        result = {"success": False}
     if result.get("success"):
         return result
-    # Fallback: focus the field, then type the value as raw keystrokes.
+    # Fallback: focus the field (coordinate-capable click), then type the value.
     _invoke(engine, "type_into", snapshot_id, element, "click")
     typed = engine.handlers["invoke_action"]({"action": "type", "value": value})
     return {
