@@ -57,9 +57,9 @@ def compose_caption(entry: dict[str, Any]) -> str:
     if perceived:
         lines.append(f"perceived: {perceived}")
     a11y = entry.get("tokens")
-    if a11y is not None and entry.get("full_tokens") is not None:
+    full = entry.get("full_tokens")
+    if a11y and full:  # a perceive/act step (a pause has zero cost)
         shot = entry.get("shot_tokens")
-        full = entry.get("full_tokens")
         shot_part = f" · focused ~{shot}" if shot is not None else ""
         lines.append(f"matrix ~{a11y} tok{shot_part} · full shot ~{full}")
     return "\n".join(lines)

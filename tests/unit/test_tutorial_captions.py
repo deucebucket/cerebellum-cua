@@ -13,6 +13,12 @@ def test_compose_caption_plain_is_just_the_caption() -> None:
     assert compose_caption({"caption": "hello"}) == "hello"
 
 
+def test_compose_caption_omits_token_line_for_zero_cost_steps() -> None:
+    # A pause (no tokens, no shot cost) shows only its caption, not "~0 tok".
+    text = compose_caption({"caption": "intro", "tokens": 0, "full_tokens": 0})
+    assert text == "intro"
+
+
 def test_compose_caption_includes_perceived_and_three_way_tokens() -> None:
     text = compose_caption({
         "caption": "Click Open", "perceived": "BUTTON 'Open'",
