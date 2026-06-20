@@ -23,6 +23,7 @@ import time
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
+from cerebellum_cua.gateway.budget import estimate_tokens
 from cerebellum_cua.tutorial.spec import Tutorial, TutorialStep
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
@@ -30,12 +31,15 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
 
 #: A monotonic, no-arg clock returning seconds as a float.
 Clock = Callable[[], float]
+#: Pacing sleep — real on a recording, a no-op (injected) in tests.
+Sleep = Callable[[float], None]
 
 
 def run_tutorial(
     engine: CuaEngine,
     tutorial: Tutorial,
     clock: Clock = time.perf_counter,
+    sleep: Sleep = time.sleep,
 ) -> dict[str, Any]:
     """Run ``tutorial`` step-by-step, returning a captioned timeline.
 
@@ -54,34 +58,77 @@ def run_tutorial(
     timeline: list[dict[str, Any]] = []
     success = True
     for step in tutorial.steps:
-        entry = _run_step(engine, step, clock, origin)
+        entry = _run_step(engine, step, clock, origin, sleep)
         timeline.append(entry)
         success = success and bool(entry["ok"])
-    return {"title": tutorial.title, "timeline": timeline, "success": success}
+    totals = {"a11y_tokens": sum(int(e["tokens"]) for e in timeline)}
+    return {
+        "title": tutorial.title,
+        "timeline": timeline,
+        "success": success,
+        "totals": totals,
+    }
 
 
 def _run_step(
-    engine: CuaEngine, step: TutorialStep, clock: Clock, origin: float
+    engine: CuaEngine, step: TutorialStep, clock: Clock, origin: float, sleep: Sleep
 ) -> dict[str, Any]:
-    """Execute one step and build its timeline entry (never raises)."""
+    """Execute one step, hold its caption for ``hold`` seconds, build its entry.
+
+    The ``sleep`` keeps the resulting screen state (and caption) on screen for the
+    authored ``hold`` so a recording shows each step long enough to read; it is a
+    no-op in unit tests. Never raises — a failed step is recorded ``ok=False``.
+    """
     start = clock() - origin
     ok = True
     summary = ""
+    tokens = 0
+    perceived = ""
+    bbox: list[int] | None = None
     try:
         result = _dispatch(engine, step)
         ok = _step_ok(result)
         summary = _summarize(result)
+        tokens = estimate_tokens(result) if result is not None else 0
+        perceived = _perceived(result)
+        bbox = _bbox(result)
     except Exception as exc:  # noqa: BLE001 - a step must never crash the run
         ok = False
         summary = f"error: {type(exc).__name__}: {exc}"
+    sleep(max(0.0, float(step.hold)))  # hold the state/caption on screen
     end = max(clock() - origin, start + step.hold)
     return {
         "caption": step.caption,
         "start": round(start, 3),
         "end": round(end, 3),
         "ok": ok,
+        "tokens": tokens,
+        "perceived": perceived,
+        "bbox": bbox,
         "result_summary": summary,
     }
+
+
+def _perceived(result: Any) -> str:
+    """Label of the element a step acted on, e.g. ``BUTTON 'Open'`` (else "")."""
+    if not isinstance(result, dict):
+        return ""
+    name = result.get("resolved_name")
+    role = result.get("resolved_role")
+    if role and name:
+        return f"{role} '{name}'"
+    if isinstance(role, str) and role:
+        return role
+    return ""
+
+
+def _bbox(result: Any) -> list[int] | None:
+    """The acted element's box (skill ``resolved_bbox`` or a screenshot region)."""
+    if isinstance(result, dict):
+        box = result.get("resolved_bbox") or result.get("region")
+        if isinstance(box, list) and len(box) == 4:
+            return [int(v) for v in box]
+    return None
 
 
 def _dispatch(engine: CuaEngine, step: TutorialStep) -> Any:

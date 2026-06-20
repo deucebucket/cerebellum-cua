@@ -1,0 +1,99 @@
+{
+  "totals": {
+    "a11y_tokens": 781,
+    "shot_tokens": 5473,
+    "full_tokens": 9555
+  },
+  "clips": [
+    {
+      "index": 0,
+      "file": "00-cerebellum-cua-drives-a.mp4",
+      "caption": "cerebellum-cua drives a real app \u2014 through the accessibility tree, not screenshots",
+      "start": 1.0,
+      "end": 4.0,
+      "perceived": "",
+      "tokens": 0,
+      "verified": true
+    },
+    {
+      "index": 1,
+      "file": "01-type-into-the-document.mp4",
+      "caption": "Type into the document",
+      "start": 4.0,
+      "end": 9.2,
+      "perceived": "",
+      "tokens": 43,
+      "verified": true
+    },
+    {
+      "index": 2,
+      "file": "02-re-perceive-the-screen.mp4",
+      "caption": "Re-perceive the screen",
+      "start": 9.2,
+      "end": 12.559,
+      "perceived": "",
+      "tokens": 52,
+      "verified": true
+    },
+    {
+      "index": 3,
+      "file": "03-a-focused-screenshot-just.mp4",
+      "caption": "A focused screenshot \u2014 just the Save button, not the whole screen",
+      "start": 12.559,
+      "end": 16.376,
+      "perceived": "",
+      "tokens": 29,
+      "verified": true
+    },
+    {
+      "index": 4,
+      "file": "04-open-the-menu.mp4",
+      "caption": "Open the menu",
+      "start": 16.376,
+      "end": 20.73,
+      "perceived": "BUTTON 'Menu'",
+      "tokens": 88,
+      "verified": true
+    },
+    {
+      "index": 5,
+      "file": "05-re-perceive-the-menu.mp4",
+      "caption": "Re-perceive: the menu's items now exist in the tree",
+      "start": 20.73,
+      "end": 24.637,
+      "perceived": "",
+      "tokens": 64,
+      "verified": true
+    },
+    {
+      "index": 6,
+      "file": "06-click-a-menu-item.mp4",
+      "caption": "Click a menu item \u2014 Find",
+      "start": 24.637,
+      "end": 29.645,
+      "perceived": "BUTTON 'Find\u2026'",
+      "tokens": 89,
+      "verified": true
+    },
+    {
+      "index": 7,
+      "file": "07-read-the-screen-back.mp4",
+      "caption": "Read the screen back",
+      "start": 29.645,
+      "end": 32.146,
+      "perceived": "",
+      "tokens": 416,
+      "verified": true
+    },
+    {
+      "index": 8,
+      "file": "08-recorded-by-the-rig.mp4",
+      "caption": "Recorded by the rig running cerebellum-cua \u2014 every action via the a11y tree\n\nperceived via the accessibility tree \u2014 no pixels\na11y matrix ~781 tok \u00b7 focused shots ~5473 \u00b7 full screenshots ~9555\n~12.2x cheaper than full screenshots (estimates)",
+      "start": 32.146,
+      "end": 35.646,
+      "perceived": "",
+      "tokens": 0,
+      "verified": true
+    }
+  ]
+}

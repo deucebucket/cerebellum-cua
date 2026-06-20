@@ -167,7 +167,7 @@ def test_png_dimensions_parsing(tmp_path: Any) -> None:
 def test_engine_screenshot_operation(monkeypatch: Any, tmp_path: Any) -> None:
     monkeypatch.setattr(
         shot, "grab_screenshot",
-        lambda path, display=None: {"path": path, "width": 100, "height": 50},
+        lambda path, display=None, region=None: {"path": path, "width": 100, "height": 50},
     )
     eng = CuaEngine(db_dsn=None, secret=SECRET)
     try:
@@ -185,7 +185,7 @@ def test_engine_screenshot_operation(monkeypatch: Any, tmp_path: Any) -> None:
 def test_engine_screenshot_unavailable_returns_typed_error(
     monkeypatch: Any,
 ) -> None:
-    def _boom(path: str, display: str | None = None) -> dict:
+    def _boom(path: str, display: str | None = None, region: Any = None) -> dict:
         raise ScreenshotError("no grabber")
 
     monkeypatch.setattr(shot, "grab_screenshot", _boom)
@@ -200,3 +200,37 @@ def test_engine_screenshot_unavailable_returns_typed_error(
     assert resp["payload"] is None
     assert resp["error"]["code"] == 1006
     assert resp["error"]["details"]["reason"] == "screenshot_unavailable"
+
+
+# --- focused (region) capture: per-grabber geometry (Task A1) ------------------
+def test_x11_grabbers_full_screen_has_no_geometry() -> None:
+    cands = shot._x11_grabbers("/tmp/x.png", ":9", None)
+    ff = dict(cands)["ffmpeg"]
+    assert "-video_size" not in ff
+    assert "-i" in ff and ":9" in ff
+
+
+def test_x11_ffmpeg_region_sets_video_size_and_offset() -> None:
+    cands = shot._x11_grabbers("/tmp/x.png", ":9", (10, 20, 100, 40))
+    ff = dict(cands)["ffmpeg"]
+    assert "-video_size" in ff
+    assert "100x40" in ff
+    assert any(a == ":9+10,20" for a in ff)
+
+
+def test_x11_scrot_region_uses_dash_a() -> None:
+    cands = shot._x11_grabbers("/tmp/x.png", ":9", (10, 20, 100, 40))
+    sc = dict(cands)["scrot"]
+    assert "-a" in sc and "10,20,100,40" in sc
+
+
+def test_x11_import_region_uses_crop() -> None:
+    cands = shot._x11_grabbers("/tmp/x.png", ":9", (10, 20, 100, 40))
+    im = dict(cands)["import"]
+    assert "-crop" in im and "100x40+10+20" in im
+
+
+def test_wayland_grim_region_uses_geometry() -> None:
+    cands = shot._wayland_grabbers("/tmp/x.png", (10, 20, 100, 40))
+    gr = dict(cands)["grim"]
+    assert "-g" in gr and "10,20 100x40" in gr

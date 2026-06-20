@@ -19,7 +19,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
-from cerebellum_cua.errors import SnapshotNotFoundError
+from cerebellum_cua.errors import SnapshotNotFoundError, UIAAccessDeniedError
 from cerebellum_cua.model import Element
 from cerebellum_cua.skills.resolver import find_one
 
@@ -74,6 +74,13 @@ def _not_found(skill: str, query: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+#: Actions for which a coordinate click is a sound fallback when the live node
+#: cannot be re-acquired: the element's on-screen box is already known, so we can
+#: click where it is. Robust for menus/popovers and other dynamic, ephemeral
+#: trees where re-walking from the desktop root fails.
+_COORD_FALLBACK_ACTIONS = frozenset({"click"})
+
+
 def _invoke(
     engine: CuaEngine,
     skill: str,
@@ -82,13 +89,77 @@ def _invoke(
     action: str,
     **extra: Any,
 ) -> dict[str, Any]:
-    """Run one action through the engine's invoke_action handler + wrap it."""
+    """Run one action through the engine's invoke_action handler + wrap it.
+
+    If a click cannot re-acquire the live element (``reacquire_failed``), fall
+    back to clicking the element's known bounding-box centre rather than failing.
+    """
     payload: dict[str, Any] = {"row_id": element.row_id, "action": action}
     if snapshot_id is not None:
         payload["snapshot_id"] = snapshot_id
     payload.update(extra)
-    result = engine.handlers["invoke_action"](payload)
-    return {"skill": skill, "resolved_row_id": element.row_id, **result}
+    try:
+        result = engine.handlers["invoke_action"](payload)
+    except UIAAccessDeniedError as exc:
+        fallback = _coordinate_fallback(engine, skill, element, action, exc)
+        if fallback is not None:
+            return fallback
+        raise
+    return {"skill": skill, **_identity(element), **result}
+
+
+def _identity(element: Element) -> dict[str, Any]:
+    """Resolved-target fields shared by every skill result: row, role, name, bbox.
+
+    Naming what got resolved is useful for any agent (and lets the demo caption +
+    focused-screenshot math read the element's box without a snapshot re-lookup).
+    """
+    from cerebellum_cua.model import ControlType  # noqa: PLC0415 - avoid cycle
+
+    try:
+        role = ControlType(element.control_type).name
+    except ValueError:
+        role = str(element.control_type)
+    rect = element.bounding_rect
+    return {
+        "resolved_row_id": element.row_id,
+        "resolved_role": role,
+        "resolved_name": element.name,
+        "resolved_bbox": [rect.left, rect.top, rect.width, rect.height],
+    }
+
+
+def _coordinate_fallback(
+    engine: CuaEngine,
+    skill: str,
+    element: Element,
+    action: str,
+    exc: UIAAccessDeniedError,
+) -> dict[str, Any] | None:
+    """Click the element's bbox centre when its live node can't be re-acquired.
+
+    Returns the wrapped coordinate-click result, or ``None`` when a fallback does
+    not apply (a different failure reason, a non-click action, or no usable box) —
+    in which case the caller re-raises the original error.
+    """
+    if exc.details.get("reason") != "reacquire_failed":
+        return None
+    if action not in _COORD_FALLBACK_ACTIONS:
+        return None
+    rect = element.bounding_rect
+    if rect.width <= 0 or rect.height <= 0:
+        return None
+    cx = rect.left + rect.width // 2
+    cy = rect.top + rect.height // 2
+    result = engine.handlers["invoke_action"](
+        {"action": "click_point", "x": cx, "y": cy}
+    )
+    return {
+        "skill": skill,
+        **_identity(element),
+        "fallback": "coordinate_click",
+        **result,
+    }
 
 
 def click(engine: CuaEngine, **query: Any) -> dict[str, Any]:
@@ -113,12 +184,19 @@ def type_into(engine: CuaEngine, value: str, **query: Any) -> dict[str, Any]:
     snapshot_id, element = _resolve(engine, query)
     if element is None:
         return _not_found("type_into", query)
-    result = _invoke(
-        engine, "type_into", snapshot_id, element, "set_text", value=value
-    )
+    try:
+        result = _invoke(
+            engine, "type_into", snapshot_id, element, "set_text", value=value
+        )
+    except UIAAccessDeniedError as exc:
+        # set_text could not re-acquire the field; fall through to the
+        # focus-then-type path (its click recovers via coordinates).
+        if exc.details.get("reason") != "reacquire_failed":
+            raise
+        result = {"success": False}
     if result.get("success"):
         return result
-    # Fallback: focus the field, then type the value as raw keystrokes.
+    # Fallback: focus the field (coordinate-capable click), then type the value.
     _invoke(engine, "type_into", snapshot_id, element, "click")
     typed = engine.handlers["invoke_action"]({"action": "type", "value": value})
     return {

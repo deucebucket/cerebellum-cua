@@ -214,6 +214,19 @@ def test_click_resolves_and_invokes(engine: CuaEngine, monkeypatch: Any) -> None
     assert calls[0]["action"] == "click"
 
 
+def test_skill_result_carries_resolved_identity(
+    engine: CuaEngine, monkeypatch: Any
+) -> None:
+    # The result names what was resolved (useful for agents + the demo captions):
+    # role, name, and on-screen bbox of the acted element.
+    engine.register_seed(_form_snapshot())
+    _stub_invoke(engine, monkeypatch)
+    result = click(engine, name="Save")
+    assert result["resolved_name"] == "Save"
+    assert result["resolved_role"] == "BUTTON"
+    assert result["resolved_bbox"] == [0, 0, 40, 20]  # _elem_dict default bbox
+
+
 def test_type_into_sets_text(engine: CuaEngine, monkeypatch: Any) -> None:
     engine.register_seed(_form_snapshot())
     calls = _stub_invoke(engine, monkeypatch)
@@ -345,3 +358,74 @@ def test_run_skill_capture_builds_first(engine: CuaEngine, monkeypatch: Any) -> 
     )
     assert built == [True]
     assert resp["payload"]["success"] is True
+
+
+def test_click_falls_back_to_coordinates_when_reacquire_fails(
+    engine: CuaEngine, monkeypatch: Any
+) -> None:
+    # When the live node can't be re-acquired, click the element's known bbox
+    # center instead of hard-failing (robust for menus/popovers/dynamic UIs).
+    from cerebellum_cua.errors import UIAAccessDeniedError
+
+    calls: list[dict[str, Any]] = []
+
+    def _fake(payload: dict[str, Any]) -> dict[str, Any]:
+        calls.append(dict(payload))
+        if payload.get("action") == "click_point":
+            return {"success": True, "action": "click_point"}
+        raise UIAAccessDeniedError(
+            reason="reacquire_failed", detail="gone")
+
+    engine.register_seed(_form_snapshot())
+    engine.handlers["invoke_action"] = _fake
+    result = click(engine, name="Save")  # Save bbox 0,0,40,20 -> center 20,10
+    assert result["success"] is True
+    assert result["fallback"] == "coordinate_click"
+    assert calls[0]["action"] == "click"            # element action tried first
+    assert calls[1] == {"action": "click_point", "x": 20, "y": 10}
+
+
+def test_click_reraises_non_reacquire_errors(
+    engine: CuaEngine, monkeypatch: Any
+) -> None:
+    # A different failure (e.g. unsupported action) must NOT trigger a blind click.
+    import pytest
+
+    from cerebellum_cua.errors import UIAAccessDeniedError
+
+    def _fake(payload: dict[str, Any]) -> dict[str, Any]:
+        raise UIAAccessDeniedError(reason="action_unsupported", detail="nope")
+
+    engine.register_seed(_form_snapshot())
+    engine.handlers["invoke_action"] = _fake
+    with pytest.raises(UIAAccessDeniedError):
+        click(engine, name="Save")
+
+
+def test_type_into_falls_back_when_set_text_reacquire_raises(
+    engine: CuaEngine, monkeypatch: Any
+) -> None:
+    # set_text can RAISE reacquire_failed (not just return success=False); the
+    # skill must still recover via click-then-type rather than propagating.
+    from cerebellum_cua.errors import UIAAccessDeniedError
+
+    calls: list[dict[str, Any]] = []
+
+    def _fake(payload: dict[str, Any]) -> dict[str, Any]:
+        calls.append(dict(payload))
+        action = payload.get("action")
+        if action == "set_text":
+            raise UIAAccessDeniedError(reason="reacquire_failed", detail="gone")
+        if action == "click":
+            # the focus click also can't re-acquire -> coordinate fallback
+            raise UIAAccessDeniedError(reason="reacquire_failed", detail="gone")
+        return {"success": True, "action": action}
+
+    engine.register_seed(_form_snapshot())
+    engine.handlers["invoke_action"] = _fake
+    result = type_into(engine, "robust text", role="EDIT")
+    assert result["success"] is True
+    actions = [c["action"] for c in calls]
+    # set_text raises -> click raises -> click_point (coord fallback) -> type
+    assert actions == ["set_text", "click", "click_point", "type"]
+    assert calls[-1]["value"] == "robust text"

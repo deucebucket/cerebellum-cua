@@ -213,7 +213,8 @@ def test_screenshot_tool_routes_to_engine(server: Any, monkeypatch: Any) -> None
 
     monkeypatch.setattr(
         shot, "grab_screenshot",
-        lambda path, display=None: {"path": path, "width": 1920, "height": 1080},
+        lambda path, display=None, region=None: {
+            "path": path, "width": 1920, "height": 1080},
     )
     screenshot = _tools_by_name(server)["screenshot"].fn
     result = screenshot(path="/tmp/x.png")
@@ -286,3 +287,21 @@ def test_build_server_without_mcp_raises_clean_error(monkeypatch: Any) -> None:
 
     with pytest.raises(McpDependencyError, match=r"pip install -e '\.\[mcp\]'"):
         build_server(db_dsn=None, secret=SECRET)
+
+
+def test_screenshot_tool_forwards_row_id_region(server: Any, monkeypatch: Any) -> None:
+    import cerebellum_cua.capture.screenshot as shot
+
+    seen: dict[str, Any] = {}
+
+    def _fake_grab(path: str, display: Any = None, region: Any = None) -> dict:
+        seen["region"] = region
+        return {"path": path, "width": 40, "height": 20,
+                "region": list(region) if region else None, "region_applied": True}
+
+    monkeypatch.setattr(shot, "grab_screenshot", _fake_grab)
+    sid = server.cua_engine.register_seed(_window_with_button(epoch=1))["snapshot_id"]
+    screenshot = _tools_by_name(server)["screenshot"].fn
+    result = screenshot(row_id=1, snapshot_id=sid)
+    assert seen["region"] == (0, 0, 40, 20)
+    assert result["region"] == [0, 0, 40, 20]

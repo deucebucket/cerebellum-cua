@@ -226,20 +226,29 @@ def list_windows_tool(engine: CuaEngine) -> ToolFn:
 def screenshot_tool(engine: CuaEngine) -> ToolFn:
     """Builder for the ``screenshot`` tool."""
 
-    def screenshot(path: str | None = None, display: str | None = None) -> dict[str, Any]:
-        """Grab ONE screenshot of the screen and return its file path +
-        dimensions. This is the opt-in visual escape hatch — use it when the
-        accessibility tree is insufficient (custom-drawn / canvas UIs) or to
-        visually confirm state. It is NOT part of build_matrix and performs no
-        analysis (no OCR, no elements). For a structured element list from pixels,
-        use build_matrix with capture_backend="vision" instead. Optional path sets
-        the output PNG; display overrides the X11 display.
+    def screenshot(
+        path: str | None = None,
+        display: str | None = None,
+        region: list[int] | None = None,
+        row_id: int | None = None,
+        snapshot_id: int | None = None,
+    ) -> dict[str, Any]:
+        """Grab ONE screenshot and return its file path + dimensions. The opt-in
+        visual escape hatch — use it when the accessibility tree is insufficient
+        (custom-drawn / canvas UIs) or to confirm state. NOT part of build_matrix;
+        performs no analysis (no OCR, no elements). Scope it cheaply:
+        region=[x,y,w,h] OR row_id (+snapshot_id) crops the grab to just that
+        element's box — far fewer image tokens than a full frame; no scope = full
+        screen. For a structured element list from pixels, use build_matrix with
+        capture_backend="vision". Optional display overrides the X11 display.
         """
         payload: dict[str, Any] = {}
-        if path is not None:
-            payload["path"] = path
-        if display is not None:
-            payload["display"] = display
+        for key, val in (
+            ("path", path), ("display", display), ("region", region),
+            ("row_id", row_id), ("snapshot_id", snapshot_id),
+        ):
+            if val is not None:
+                payload[key] = val
         return _dispatch(engine, "screenshot", payload)
 
     return screenshot
