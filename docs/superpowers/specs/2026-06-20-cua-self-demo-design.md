@@ -139,11 +139,15 @@ The closing card and the written explainer state plainly:
 
 ## 8. Verification
 
-- Extract frames from the final mp4 (`ffmpeg`) and visually inspect: captions
-  legible and correctly timed, each action visibly performed, numbers correct.
-- Confirm the recorded per-step tokens match the runner's timeline for that run.
-- Send the gif/mp4 (and a couple of key frames) to the user to eyeball before
-  declaring done.
+- Extract frames from the final mp4 AND from each segment clip (`ffmpeg`) and
+  visually inspect: captions legible and correctly timed, each action visibly
+  performed, numbers correct, and **each clip's first frame is a settled state**
+  (not mid-action).
+- Confirm every recorded action `verified` true in the run manifest, and that the
+  recorded per-step tokens match the runner's timeline for that run.
+- Confirm clips concatenate back into the master cleanly (no seam artifacts).
+- Send the gif/master/clips (and a couple of key frames) to the user to eyeball
+  before declaring done.
 
 ## 9. Components / interfaces touched
 
@@ -214,3 +218,28 @@ typed error — never produce a corrupt grab.
 **Why it matters here.** It lets the demo show a fair three-way token comparison
 (matrix vs focused shot vs full shot) and gives agents a cheap "look closely at
 this one thing" option that pairs with the a11y tree instead of competing with it.
+
+## 13. Recording: modular, editable clips with clean cut points
+
+The output is **per-segment clips that can be pasted together and edited**, not one
+unbroken take. Requirements:
+
+- **Clean start points.** Every clip begins from a *settled* state — the app at
+  rest, cursor parked, the previous action fully complete — never mid-operation.
+  This is enforced by structuring the flow so each segment starts with a short
+  settle/`pause` (cursor home + a beat) before its action, so a cut at that
+  boundary lands on a quiet frame.
+- **One master, cut at boundaries.** Record one continuous run (state continuity is
+  hardest to fake across separate runs), then cut it into clips at the tutorial
+  timeline's step boundaries with ffmpeg (lossless stream-copy at keyframe-aligned
+  cuts). Because every boundary is a settled state, each clip is independently
+  usable and the clips concatenate seamlessly back into the whole.
+- **Deliverables become:** the master `mp4`, a numbered set of segment clips
+  (`docs/assets/clips/NN-<step>.mp4`) ready for editing, and the README `gif`.
+- **Verified actions.** Each action in the recorded run is confirmed to have landed
+  using the engine's verify loop (act → re-capture → diff → `verified`) AND the
+  §4 zero-flake harness (5 consecutive clean runs). A clip is only kept if its
+  action verified; a non-verifying action is a flake to fix, not something to ship.
+- **A manifest** (`docs/assets/clips/manifest.json`) lists each clip with its
+  caption, start/end, perceived element, token figures, and `verified` flag — an
+  edit list, and the provenance record that nothing was faked.
