@@ -345,3 +345,45 @@ def test_run_skill_capture_builds_first(engine: CuaEngine, monkeypatch: Any) -> 
     )
     assert built == [True]
     assert resp["payload"]["success"] is True
+
+
+def test_click_falls_back_to_coordinates_when_reacquire_fails(
+    engine: CuaEngine, monkeypatch: Any
+) -> None:
+    # When the live node can't be re-acquired, click the element's known bbox
+    # center instead of hard-failing (robust for menus/popovers/dynamic UIs).
+    from cerebellum_cua.errors import UIAAccessDeniedError
+
+    calls: list[dict[str, Any]] = []
+
+    def _fake(payload: dict[str, Any]) -> dict[str, Any]:
+        calls.append(dict(payload))
+        if payload.get("action") == "click_point":
+            return {"success": True, "action": "click_point"}
+        raise UIAAccessDeniedError(
+            reason="reacquire_failed", detail="gone")
+
+    engine.register_seed(_form_snapshot())
+    engine.handlers["invoke_action"] = _fake
+    result = click(engine, name="Save")  # Save bbox 0,0,40,20 -> center 20,10
+    assert result["success"] is True
+    assert result["fallback"] == "coordinate_click"
+    assert calls[0]["action"] == "click"            # element action tried first
+    assert calls[1] == {"action": "click_point", "x": 20, "y": 10}
+
+
+def test_click_reraises_non_reacquire_errors(
+    engine: CuaEngine, monkeypatch: Any
+) -> None:
+    # A different failure (e.g. unsupported action) must NOT trigger a blind click.
+    import pytest
+
+    from cerebellum_cua.errors import UIAAccessDeniedError
+
+    def _fake(payload: dict[str, Any]) -> dict[str, Any]:
+        raise UIAAccessDeniedError(reason="action_unsupported", detail="nope")
+
+    engine.register_seed(_form_snapshot())
+    engine.handlers["invoke_action"] = _fake
+    with pytest.raises(UIAAccessDeniedError):
+        click(engine, name="Save")
