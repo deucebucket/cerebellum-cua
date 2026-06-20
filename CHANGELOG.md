@@ -7,6 +7,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Focused (region/element) screenshots**: the `screenshot` op + MCP tool accept
+  `region=[x,y,w,h]` or `row_id` (crop to an element's bbox) for far cheaper
+  "look at just this widget" captures; full-screen behaviour is unchanged.
+- **Self-recorded captioned demo** (`docs/assets/cua-drive.mp4`/`.gif` + editable
+  `clips/`): cerebellum-cua drives gedit (type → focused shot → menu → click →
+  read) via the a11y tree, with per-step three-way token captions (a11y matrix vs
+  focused shot vs full screenshot, ~12× cheaper) and a closing total — recorded by
+  the rig running CUA. Tutorial runner/captions gained per-step token + perceived
+  + bbox instrumentation, paced holds, and a clip planner (`tutorial.clips`).
 - Token-budget accounting in the gateway (`estimated_tokens`, optional ceiling,
   `TokenBudgetExceededError` 1009). (#1)
 - MCP server (`cerebellum_cua.mcp`, `cerebellum-cua-mcp`, `[mcp]` extra). (#2)
@@ -59,6 +68,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   target to make the reason accurate.
 
 ### Fixed
+- Skill `click`/`open`/`focus` hard-failed (`reacquire_failed`, 1006) on ephemeral
+  popover/menu items even when the element's box was freshly captured; they now
+  fall back to a coordinate click at the element's bbox centre, and `type_into`
+  recovers the same way — making menu/popover/dynamic navigation reliable. Skill
+  results now also carry `resolved_role`/`resolved_name`/`resolved_bbox`.
 - SQLite `sqlite://` DSN parsing stripped *every* leading slash, making absolute
   paths impossible (`sqlite:////abs.db` crashed; `sqlite:///abs.db` silently
   went relative). Now follows the SQLAlchemy convention:

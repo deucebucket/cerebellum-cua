@@ -31,6 +31,19 @@ the change. Recorded in the container VM rig (see [docs/MODES.md](docs/MODES.md)
 
 ![Result: the text the agent typed, verified](docs/assets/skill-demo.png)
 
+A longer, captioned walkthrough — type → focused screenshot → open a menu → click
+a menu item → read back, with the per-step **token cost** shown on screen
+(a11y matrix vs focused shot vs full screenshot, ~12× cheaper than full
+screenshots) — was recorded by the rig *running cerebellum-cua* itself:
+
+![cerebellum-cua driving gedit, captioned with token costs](docs/assets/cua-drive.gif)
+
+The full-resolution video and editable per-segment clips are in
+[`docs/assets/cua-drive.mp4`](docs/assets/cua-drive.mp4) and
+[`docs/assets/clips/`](docs/assets/clips/); see
+[docs/TUTORIALS.md](docs/TUTORIALS.md#the-self-recorded-demo-cua-drive) for how it
+was built.
+
 ## What it does
 
 - Reads the live accessibility tree of a desktop session through a pluggable
