@@ -562,7 +562,10 @@ def test_screenshot_row_id_crops_to_element_bbox(
 
     seen: dict[str, Any] = {}
 
-    def _fake_grab(path: str, display: Any = None, region: Any = None) -> dict:
+    def _fake_grab(
+        path: str, display: Any = None, region: Any = None,
+        window_id: Any = None,
+    ) -> dict:
         seen["region"] = region
         return {"path": path, "width": 40, "height": 20,
                 "region": list(region) if region else None, "region_applied": True}
@@ -583,7 +586,10 @@ def test_screenshot_explicit_region_passed_through(
 
     seen: dict[str, Any] = {}
 
-    def _fake_grab(path: str, display: Any = None, region: Any = None) -> dict:
+    def _fake_grab(
+        path: str, display: Any = None, region: Any = None,
+        window_id: Any = None,
+    ) -> dict:
         seen["region"] = region
         return {"path": path, "width": 5, "height": 6, "region": list(region),
                 "region_applied": True}

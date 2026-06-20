@@ -68,6 +68,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   target to make the reason accurate.
 
 ### Fixed
+- **`screenshot` no longer returns a silent all-black "success"** (issue #55): a
+  full-screen grab that decodes to pure black is rejected with a typed `1006`
+  (under a Wayland compositor an X11 root grab is black). Wayland is now detected
+  via `WAYLAND_DISPLAY` even when `XDG_SESSION_TYPE` is unset, and a new
+  `window_id` scope captures one X11/Xwayland window's real pixels
+  (`import -window <id>`) — the reliable path under KWin/Wayland. This also stops
+  the vision `build_matrix` from OCRing a black frame into an empty matrix.
 - **Coordinate/raw synthetic input no longer core-dumps the engine** when the
   AT-SPI registry is unreachable/broken (`dbind` C-level abort, uncatchable —
   issue #54). `Atspi.generate_*_event` is now opt-in (`use_atspi_input` /

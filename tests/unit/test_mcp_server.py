@@ -213,7 +213,7 @@ def test_screenshot_tool_routes_to_engine(server: Any, monkeypatch: Any) -> None
 
     monkeypatch.setattr(
         shot, "grab_screenshot",
-        lambda path, display=None, region=None: {
+        lambda path, display=None, region=None, window_id=None: {
             "path": path, "width": 1920, "height": 1080},
     )
     screenshot = _tools_by_name(server)["screenshot"].fn
@@ -294,7 +294,10 @@ def test_screenshot_tool_forwards_row_id_region(server: Any, monkeypatch: Any) -
 
     seen: dict[str, Any] = {}
 
-    def _fake_grab(path: str, display: Any = None, region: Any = None) -> dict:
+    def _fake_grab(
+        path: str, display: Any = None, region: Any = None,
+        window_id: Any = None,
+    ) -> dict:
         seen["region"] = region
         return {"path": path, "width": 40, "height": 20,
                 "region": list(region) if region else None, "region_applied": True}

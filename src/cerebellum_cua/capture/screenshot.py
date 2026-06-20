@@ -29,6 +29,7 @@ import shutil
 import struct
 import subprocess
 import tempfile
+import zlib
 
 #: PNG magic number; the IHDR chunk (width/height) immediately follows it.
 _PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
@@ -45,6 +46,7 @@ def grab_screenshot(
     path: str,
     display: str | None = None,
     region: tuple[int, int, int, int] | None = None,
+    window_id: str | None = None,
 ) -> dict:
     """Capture the screen (or a ``region`` of it) to ``path`` (PNG).
 
@@ -63,7 +65,7 @@ def grab_screenshot(
     Raises:
         ScreenshotError: If no grabber is installed, or every candidate failed.
     """
-    candidates = _candidate_grabbers(path, display, region)
+    candidates = _candidate_grabbers(path, display, region, window_id)
     if not candidates:
         raise ScreenshotError(
             "no screenshot grabber available: install one of ffmpeg, "
@@ -71,6 +73,7 @@ def grab_screenshot(
         )
 
     errors: list[str] = []
+    saw_blank = False
     for tool, argv in candidates:
         if shutil.which(tool) is None:
             continue
@@ -83,39 +86,110 @@ def grab_screenshot(
             errors.append(f"{tool}: {exc}")
             continue
         width, height = _png_dimensions(path)
+        # A full-screen grab that decodes to pure black captured nothing — under a
+        # Wayland compositor an X11 root grab is black (issue #55). Don't return it
+        # as success; try the next grabber, then fail loudly. (A *region*/window
+        # grab may legitimately be black, so only validate full-screen root grabs.)
+        if region is None and window_id is None and _looks_blank(path):
+            saw_blank = True
+            errors.append(f"{tool}: blank (all-black) frame")
+            continue
         return {
             "path": path, "width": width, "height": height,
             "region": list(region) if region is not None else None,
             "region_applied": bool(applied),
         }
 
+    if saw_blank:
+        raise ScreenshotError(
+            "screenshot captured a blank (all-black) frame: the grab returned no "
+            "pixels. Under a Wayland compositor an X11 root grab is black — use a "
+            "Wayland grabber (grim), or capture a specific window via window_id "
+            "('import -window <id>'). Tried: " + "; ".join(errors)
+        )
     detail = "; ".join(errors) if errors else "no candidate tool was on PATH"
     raise ScreenshotError(f"all screenshot grabbers failed ({detail}).")
 
 
 def _candidate_grabbers(
-    path: str, display: str | None, region: tuple[int, int, int, int] | None
+    path: str,
+    display: str | None,
+    region: tuple[int, int, int, int] | None,
+    window_id: str | None = None,
 ) -> list[tuple[str, list[str]]]:
     """Build the ordered (tool, argv) candidate list for this display server."""
-    if _is_wayland():
+    if _is_wayland() and window_id is None:
         return _wayland_grabbers(path, region)
-    return _x11_grabbers(path, display, region)
+    return _x11_grabbers(path, display, region, window_id)
 
 
 def _is_wayland() -> bool:
-    """True when the session is Wayland (so X11 grabbers won't work)."""
-    return os.environ.get("XDG_SESSION_TYPE", "").lower() == "wayland"
+    """True when the session is Wayland (so an X11 *root* grab returns black).
+
+    ``XDG_SESSION_TYPE`` is unset in many detached/tty contexts, so also treat a
+    set ``WAYLAND_DISPLAY`` as Wayland (issue #55).
+    """
+    if os.environ.get("XDG_SESSION_TYPE", "").lower() == "wayland":
+        return True
+    return bool(os.environ.get("WAYLAND_DISPLAY"))
+
+
+def _png_idat(path: str) -> bytes:
+    """Concatenate a PNG's IDAT chunk data (the zlib-compressed image stream)."""
+    with open(path, "rb") as fh:
+        if fh.read(8) != _PNG_SIGNATURE:
+            return b""
+        out = bytearray()
+        while True:
+            head = fh.read(8)
+            if len(head) < 8:
+                break
+            length = struct.unpack(">I", head[:4])[0]
+            ctype = head[4:8]
+            data = fh.read(length)
+            fh.read(4)  # CRC
+            if ctype == b"IDAT":
+                out += data
+            elif ctype == b"IEND":
+                break
+        return bytes(out)
+
+
+def _looks_blank(path: str) -> bool:
+    """True iff the PNG decodes to all-zero bytes — a pure-black/empty grab.
+
+    Conservative on purpose: only an ALL-ZERO decompressed stream counts as blank
+    (the Wayland X11-root-grab failure mode, where the compositor owns the window
+    surfaces), so legitimate content is never flagged. Best-effort — returns
+    ``False`` if the file can't be parsed.
+    """
+    try:
+        idat = _png_idat(path)
+        if not idat:
+            return False
+        raw = zlib.decompress(idat)
+    except (OSError, zlib.error, struct.error):
+        return False
+    return bool(raw) and not any(raw)
 
 
 def _x11_grabbers(
-    path: str, display: str | None, region: tuple[int, int, int, int] | None
+    path: str,
+    display: str | None,
+    region: tuple[int, int, int, int] | None,
+    window_id: str | None = None,
 ) -> list[tuple[str, list[str]]]:
     """ffmpeg x11grab, ImageMagick import, then scrot — in preference order.
 
     With a ``region`` each grabber is given its native geometry flags so the
-    captured image is genuinely cropped (not a full grab cropped afterward).
+    captured image is genuinely cropped (not a full grab cropped afterward). With
+    a ``window_id`` (an X11/Xwayland window), ``import -window <id>`` captures that
+    window's real pixels — the reliable path under a Wayland compositor, where a
+    root grab is black (issue #55).
     """
     disp = display or os.environ.get("DISPLAY") or ":0"
+    if window_id is not None:
+        return [("import", ["import", "-window", str(window_id), path])]
     if region is not None:
         x, y, w, h = region
         ffmpeg = [

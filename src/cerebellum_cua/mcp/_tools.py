@@ -232,20 +232,25 @@ def screenshot_tool(engine: CuaEngine) -> ToolFn:
         region: list[int] | None = None,
         row_id: int | None = None,
         snapshot_id: int | None = None,
+        window_id: str | None = None,
     ) -> dict[str, Any]:
         """Grab ONE screenshot and return its file path + dimensions. The opt-in
         visual escape hatch — use it when the accessibility tree is insufficient
         (custom-drawn / canvas UIs) or to confirm state. NOT part of build_matrix;
         performs no analysis (no OCR, no elements). Scope it cheaply:
         region=[x,y,w,h] OR row_id (+snapshot_id) crops the grab to just that
-        element's box — far fewer image tokens than a full frame; no scope = full
-        screen. For a structured element list from pixels, use build_matrix with
-        capture_backend="vision". Optional display overrides the X11 display.
+        element's box (far fewer image tokens than a full frame); window_id grabs
+        one X11/Xwayland window's pixels (reliable under Wayland, where a full root
+        grab is black); no scope = full screen. A blank/all-black full-screen grab
+        returns a typed error instead of silent success. For a structured element
+        list from pixels, use build_matrix with capture_backend="vision". Optional
+        display overrides the X11 display.
         """
         payload: dict[str, Any] = {}
         for key, val in (
             ("path", path), ("display", display), ("region", region),
             ("row_id", row_id), ("snapshot_id", snapshot_id),
+            ("window_id", window_id),
         ):
             if val is not None:
                 payload[key] = val
