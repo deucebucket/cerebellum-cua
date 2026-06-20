@@ -41,20 +41,29 @@ class ScreenshotError(RuntimeError):
     """Raised when no screenshot grabber is available or all candidates fail."""
 
 
-def grab_screenshot(path: str, display: str | None = None) -> dict:
-    """Capture the whole screen to ``path`` (PNG) and return its metadata.
+def grab_screenshot(
+    path: str,
+    display: str | None = None,
+    region: tuple[int, int, int, int] | None = None,
+) -> dict:
+    """Capture the screen (or a ``region`` of it) to ``path`` (PNG).
 
     Args:
         path: Destination PNG path. Its directory must already exist.
         display: X11 display override (e.g. ``":0"``). Defaults to ``$DISPLAY``.
+        region: Optional ``(x, y, w, h)`` crop in screen pixels. When given, the
+            grab is cropped to it at capture time (far fewer pixels/tokens than a
+            full frame). ``None`` captures the whole screen, as before.
 
     Returns:
-        ``{"path": str, "width": int, "height": int}`` for the saved image.
+        ``{"path", "width", "height", "region", "region_applied"}`` for the saved
+        image; ``width``/``height`` reflect the cropped image when a region was
+        applied.
 
     Raises:
         ScreenshotError: If no grabber is installed, or every candidate failed.
     """
-    candidates = _candidate_grabbers(path, display)
+    candidates = _candidate_grabbers(path, display, region)
     if not candidates:
         raise ScreenshotError(
             "no screenshot grabber available: install one of ffmpeg, "
@@ -65,25 +74,32 @@ def grab_screenshot(path: str, display: str | None = None) -> dict:
     for tool, argv in candidates:
         if shutil.which(tool) is None:
             continue
+        # spectacle has no reliable headless region mode: it grabs full-screen,
+        # so report region_applied=False rather than implying a crop happened.
+        applied = region is not None and tool != "spectacle"
         try:
             _run_grabber(argv)
         except ScreenshotError as exc:
             errors.append(f"{tool}: {exc}")
             continue
         width, height = _png_dimensions(path)
-        return {"path": path, "width": width, "height": height}
+        return {
+            "path": path, "width": width, "height": height,
+            "region": list(region) if region is not None else None,
+            "region_applied": bool(applied),
+        }
 
     detail = "; ".join(errors) if errors else "no candidate tool was on PATH"
     raise ScreenshotError(f"all screenshot grabbers failed ({detail}).")
 
 
 def _candidate_grabbers(
-    path: str, display: str | None
+    path: str, display: str | None, region: tuple[int, int, int, int] | None
 ) -> list[tuple[str, list[str]]]:
     """Build the ordered (tool, argv) candidate list for this display server."""
     if _is_wayland():
-        return _wayland_grabbers(path)
-    return _x11_grabbers(path, display)
+        return _wayland_grabbers(path, region)
+    return _x11_grabbers(path, display, region)
 
 
 def _is_wayland() -> bool:
@@ -91,26 +107,43 @@ def _is_wayland() -> bool:
     return os.environ.get("XDG_SESSION_TYPE", "").lower() == "wayland"
 
 
-def _x11_grabbers(path: str, display: str | None) -> list[tuple[str, list[str]]]:
-    """ffmpeg x11grab, ImageMagick import, then scrot — in preference order."""
+def _x11_grabbers(
+    path: str, display: str | None, region: tuple[int, int, int, int] | None
+) -> list[tuple[str, list[str]]]:
+    """ffmpeg x11grab, ImageMagick import, then scrot — in preference order.
+
+    With a ``region`` each grabber is given its native geometry flags so the
+    captured image is genuinely cropped (not a full grab cropped afterward).
+    """
     disp = display or os.environ.get("DISPLAY") or ":0"
-    return [
-        (
-            "ffmpeg",
-            [
-                "ffmpeg", "-y", "-f", "x11grab", "-i", disp,
-                "-frames:v", "1", path,
-            ],
-        ),
-        ("import", ["import", "-window", "root", path]),
-        ("scrot", ["scrot", "--overwrite", path]),
-    ]
+    if region is not None:
+        x, y, w, h = region
+        ffmpeg = [
+            "ffmpeg", "-y", "-f", "x11grab",
+            "-video_size", f"{w}x{h}", "-i", f"{disp}+{x},{y}",
+            "-frames:v", "1", path,
+        ]
+        imp = ["import", "-window", "root", "-crop", f"{w}x{h}+{x}+{y}", path]
+        scrot = ["scrot", "-a", f"{x},{y},{w},{h}", "--overwrite", path]
+    else:
+        ffmpeg = ["ffmpeg", "-y", "-f", "x11grab", "-i", disp,
+                  "-frames:v", "1", path]
+        imp = ["import", "-window", "root", path]
+        scrot = ["scrot", "--overwrite", path]
+    return [("ffmpeg", ffmpeg), ("import", imp), ("scrot", scrot)]
 
 
-def _wayland_grabbers(path: str) -> list[tuple[str, list[str]]]:
-    """grim, then spectacle (best-effort) — in preference order."""
+def _wayland_grabbers(
+    path: str, region: tuple[int, int, int, int] | None
+) -> list[tuple[str, list[str]]]:
+    """grim (region-capable), then spectacle (full-screen fallback)."""
+    if region is not None:
+        x, y, w, h = region
+        grim = ["grim", "-g", f"{x},{y} {w}x{h}", path]
+    else:
+        grim = ["grim", path]
     return [
-        ("grim", ["grim", path]),
+        ("grim", grim),
         ("spectacle", ["spectacle", "-b", "-n", "-o", path]),
     ]
 
