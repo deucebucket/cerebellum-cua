@@ -43,3 +43,14 @@ def test_build_filter_uses_composed_caption_text() -> None:
          "perceived": "BUTTON 'Open'", "tokens": 420, "full_tokens": 1365},
     ])
     assert "perceived" in flt
+
+
+def test_drawtext_folds_apostrophes_and_keeps_newlines() -> None:
+    from cerebellum_cua.tutorial.captions import build_drawtext_filter
+    flt = build_drawtext_filter([
+        {"caption": "perceived: BUTTON 'Menu'\nmatrix ~88 tok",
+         "start": 0.0, "end": 2.0},
+    ])
+    assert "'Menu'" not in flt        # no raw ASCII apostrophes (would break ffmpeg)
+    assert "’Menu’" in flt            # folded to typographic
+    assert "\\:" in flt               # colon escaped (renders clean)

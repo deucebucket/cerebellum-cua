@@ -32,15 +32,20 @@ _BOTTOM_MARGIN = 48
 def _escape_drawtext_text(text: str) -> str:
     """Escape one caption for ffmpeg drawtext's text *and* filtergraph parsers.
 
-    Order matters: escape backslashes first, then the characters that the
-    filtergraph tokenizer treats specially, then drawtext-specific sequences.
+    The text is embedded in a single-quoted drawtext value. A literal ASCII
+    apostrophe would close that quote and break the whole filterchain, so it is
+    folded to a typographic apostrophe (renders identically, never a metachar).
+    Real newlines are kept — drawtext renders them as line breaks. The remaining
+    filtergraph delimiters are backslash-escaped (they render clean inside the
+    quotes, e.g. ``\\:`` shows as ``:``).
     """
     out = text.replace("\\", "\\\\")
-    # Drawtext text-expansion / literal characters.
+    # Drawtext text-expansion character.
     out = out.replace("%", "\\%")
-    out = out.replace("\n", "\\n")
+    # ASCII apostrophe -> typographic (closing the single-quoted value otherwise).
+    out = out.replace("'", "’")
     # Filtergraph option delimiters that would otherwise end the value.
-    for ch in (":", "'", "[", "]", ",", ";"):
+    for ch in (":", "[", "]", ",", ";"):
         out = out.replace(ch, "\\" + ch)
     return out
 
