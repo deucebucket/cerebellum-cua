@@ -23,6 +23,7 @@ import time
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
+from cerebellum_cua.gateway.budget import estimate_tokens
 from cerebellum_cua.tutorial.spec import Tutorial, TutorialStep
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
@@ -57,7 +58,13 @@ def run_tutorial(
         entry = _run_step(engine, step, clock, origin)
         timeline.append(entry)
         success = success and bool(entry["ok"])
-    return {"title": tutorial.title, "timeline": timeline, "success": success}
+    totals = {"a11y_tokens": sum(int(e["tokens"]) for e in timeline)}
+    return {
+        "title": tutorial.title,
+        "timeline": timeline,
+        "success": success,
+        "totals": totals,
+    }
 
 
 def _run_step(
@@ -67,10 +74,14 @@ def _run_step(
     start = clock() - origin
     ok = True
     summary = ""
+    tokens = 0
+    perceived = ""
     try:
         result = _dispatch(engine, step)
         ok = _step_ok(result)
         summary = _summarize(result)
+        tokens = estimate_tokens(result) if result is not None else 0
+        perceived = _perceived(result)
     except Exception as exc:  # noqa: BLE001 - a step must never crash the run
         ok = False
         summary = f"error: {type(exc).__name__}: {exc}"
@@ -80,8 +91,21 @@ def _run_step(
         "start": round(start, 3),
         "end": round(end, 3),
         "ok": ok,
+        "tokens": tokens,
+        "perceived": perceived,
         "result_summary": summary,
     }
+
+
+def _perceived(result: Any) -> str:
+    """Best-effort label of the element a step acted on / perceived."""
+    if not isinstance(result, dict):
+        return ""
+    for key in ("name", "target", "resolved", "title"):
+        val = result.get(key)
+        if isinstance(val, str) and val.strip():
+            return val.strip()
+    return ""
 
 
 def _dispatch(engine: CuaEngine, step: TutorialStep) -> Any:
