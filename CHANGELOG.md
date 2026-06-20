@@ -68,6 +68,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   target to make the reason accurate.
 
 ### Fixed
+- **Coordinate/raw synthetic input no longer core-dumps the engine** when the
+  AT-SPI registry is unreachable/broken (`dbind` C-level abort, uncatchable —
+  issue #54). `Atspi.generate_*_event` is now opt-in (`use_atspi_input` /
+  `CEREBELLUM_ATSPI_INPUT=1`); coordinate/key actions default to a CLI tool, with
+  a new **`xdotool` (X11)** path alongside `ydotool` (Wayland), chosen by display
+  server.
 - Skill `click`/`open`/`focus` hard-failed (`reacquire_failed`, 1006) on ephemeral
   popover/menu items even when the element's box was freshly captured; they now
   fall back to a coordinate click at the element's bbox centre, and `type_into`
