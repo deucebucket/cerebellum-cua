@@ -167,7 +167,8 @@ def test_png_dimensions_parsing(tmp_path: Any) -> None:
 def test_engine_screenshot_operation(monkeypatch: Any, tmp_path: Any) -> None:
     monkeypatch.setattr(
         shot, "grab_screenshot",
-        lambda path, display=None, region=None: {"path": path, "width": 100, "height": 50},
+        lambda path, display=None, region=None, window_id=None: {
+            "path": path, "width": 100, "height": 50},
     )
     eng = CuaEngine(db_dsn=None, secret=SECRET)
     try:
@@ -185,7 +186,10 @@ def test_engine_screenshot_operation(monkeypatch: Any, tmp_path: Any) -> None:
 def test_engine_screenshot_unavailable_returns_typed_error(
     monkeypatch: Any,
 ) -> None:
-    def _boom(path: str, display: str | None = None, region: Any = None) -> dict:
+    def _boom(
+        path: str, display: str | None = None, region: Any = None,
+        window_id: Any = None,
+    ) -> dict:
         raise ScreenshotError("no grabber")
 
     monkeypatch.setattr(shot, "grab_screenshot", _boom)
@@ -234,3 +238,77 @@ def test_wayland_grim_region_uses_geometry() -> None:
     cands = shot._wayland_grabbers("/tmp/x.png", (10, 20, 100, 40))
     gr = dict(cands)["grim"]
     assert "-g" in gr and "10,20 100x40" in gr
+
+
+# --- #55: Wayland detection + blank-frame validation + per-window capture -----
+def _write_solid_png(path: str, width: int, height: int, value: int) -> None:
+    """Write a real PNG (IHDR+IDAT+IEND) of a solid colour; value 0 = black."""
+    import zlib
+
+    raw = bytearray()
+    for _ in range(height):
+        raw.append(0)  # scanline filter byte
+        raw += bytes([value, value, value]) * width
+    idat = zlib.compress(bytes(raw))
+
+    def _chunk(ctype: bytes, data: bytes) -> bytes:
+        return struct.pack(">I", len(data)) + ctype + data + b"\x00\x00\x00\x00"
+
+    with open(path, "wb") as fh:
+        fh.write(shot._PNG_SIGNATURE)
+        fh.write(_chunk(b"IHDR", struct.pack(">II", width, height) + b"\x08\x02\x00\x00\x00"))
+        fh.write(_chunk(b"IDAT", idat))
+        fh.write(_chunk(b"IEND", b""))
+
+
+def test_wayland_detected_via_wayland_display_env(monkeypatch: Any) -> None:
+    monkeypatch.delenv("XDG_SESSION_TYPE", raising=False)
+    monkeypatch.setenv("WAYLAND_DISPLAY", "wayland-0")
+    assert shot._is_wayland() is True
+
+
+def test_full_screen_black_grab_raises_not_silent_success(
+    monkeypatch: Any, tmp_path: Any
+) -> None:
+    monkeypatch.setenv("XDG_SESSION_TYPE", "x11")
+    monkeypatch.setattr(
+        shot.shutil, "which", lambda n: "/usr/bin/import" if n == "import" else None)
+
+    def _fake_run(argv: list[str], **_kw: Any) -> Any:
+        _write_solid_png(argv[-1], 8, 8, 0)  # all black
+
+        class _R:
+            returncode = 0
+            stdout = ""
+            stderr = ""
+        return _R()
+
+    monkeypatch.setattr(shot.subprocess, "run", _fake_run)
+    with pytest.raises(ScreenshotError, match="blank"):
+        grab_screenshot(str(tmp_path / "s.png"))
+
+
+def test_non_black_full_screen_grab_succeeds(monkeypatch: Any, tmp_path: Any) -> None:
+    monkeypatch.setenv("XDG_SESSION_TYPE", "x11")
+    monkeypatch.setattr(
+        shot.shutil, "which", lambda n: "/usr/bin/import" if n == "import" else None)
+
+    def _fake_run(argv: list[str], **_kw: Any) -> Any:
+        _write_solid_png(argv[-1], 8, 8, 200)  # real content
+
+        class _R:
+            returncode = 0
+            stdout = ""
+            stderr = ""
+        return _R()
+
+    monkeypatch.setattr(shot.subprocess, "run", _fake_run)
+    out = grab_screenshot(str(tmp_path / "s.png"))
+    assert out["width"] == 8 and out["height"] == 8
+
+
+def test_window_id_uses_import_window_capture(monkeypatch: Any) -> None:
+    cands = shot._x11_grabbers("/tmp/x.png", ":0", None, window_id="0x2a")
+    im = dict(cands)["import"]
+    assert "-window" in im and "0x2a" in im
+    assert "root" not in im

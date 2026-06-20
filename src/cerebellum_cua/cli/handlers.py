@@ -315,10 +315,13 @@ class OperationHandlers:
         The opt-in, on-demand half of hybrid vision — NOT part of ``build_matrix``.
         Scope is optional and mutually exclusive: ``region`` ``[x,y,w,h]`` crops to
         an explicit rect; ``row_id`` (+ optional ``snapshot_id``) crops to that
-        element's stored ``bounding_rect`` (cheap "look at just this widget"). No
-        scope -> full screen, unchanged. Other keys: ``path`` (destination PNG;
-        temp if absent), ``display`` (X11 override). On a host with no grabber a
-        typed ``1006`` (``UIA_ACCESS_DENIED``) is raised rather than crashing.
+        element's stored ``bounding_rect`` (cheap "look at just this widget");
+        ``window_id`` captures one X11/Xwayland window's real pixels (the reliable
+        path under a Wayland compositor, where a root grab is black). No scope ->
+        full screen. Other keys: ``path`` (destination PNG; temp if absent),
+        ``display`` (X11 override). A full-screen grab that comes back all-black is
+        rejected with a typed ``1006`` rather than returned as a silent success; a
+        host with no grabber likewise raises ``1006`` instead of crashing.
         """
         from cerebellum_cua.capture.screenshot import (  # noqa: PLC0415
             ScreenshotError,
@@ -329,8 +332,12 @@ class OperationHandlers:
         path = str(payload.get("path") or default_screenshot_path())
         display = payload.get("display")
         region = self._resolve_region(payload)
+        window_id = payload.get("window_id")
         try:
-            return grab_screenshot(path, display=display, region=region)
+            return grab_screenshot(
+                path, display=display, region=region,
+                window_id=str(window_id) if window_id is not None else None,
+            )
         except ScreenshotError as exc:
             raise UIAAccessDeniedError(
                 reason="screenshot_unavailable", detail=str(exc)
