@@ -73,16 +73,27 @@ class SyntheticInput(AtspiInputMixin, YdotoolInputMixin):
     def __init__(
         self,
         prefer_ydotool: bool | None = None,
+        *,
+        use_atspi_input: bool | None = None,
         speed: str = "human",
         move_duration: float = 0.5,
         steps: int = 30,
         click_pause: float = 0.08,
         key_delay: float = 0.012,
     ) -> None:
-        # On Wayland, XTEST-backed Atspi events do not work, so prefer ydotool.
-        if prefer_ydotool is None:
-            prefer_ydotool = os.environ.get("XDG_SESSION_TYPE", "").lower() == "wayland"
-        self._prefer_ydotool = prefer_ydotool
+        # AT-SPI synthetic input (Atspi.generate_*_event) is OPT-IN: it aborts the
+        # whole process at the C level (`dbind` abort) when the a11y registry is
+        # unreachable/broken — uncatchable in Python (issue #54). Coordinate/raw
+        # input doesn't need the a11y tree, so default to the CLI tools
+        # (xdotool/ydotool) and only use the Atspi route when explicitly enabled.
+        if use_atspi_input is None:
+            if prefer_ydotool is not None:
+                use_atspi_input = not prefer_ydotool  # back-compat alias
+            else:
+                use_atspi_input = os.environ.get("CEREBELLUM_ATSPI_INPUT", "") == "1"
+        self._use_atspi_input = bool(use_atspi_input)
+        # Kept for the dispatch gates below: ``not _prefer_ydotool`` == "use Atspi".
+        self._prefer_ydotool = not self._use_atspi_input
         self.speed = speed
         self.move_duration = float(move_duration)
         self.steps = max(1, int(steps))

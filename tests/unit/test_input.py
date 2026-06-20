@@ -216,3 +216,32 @@ def test_atspi_route_used_when_available(monkeypatch: Any) -> None:
     si = SyntheticInput(prefer_ydotool=False, speed="instant")
     assert si.click(7, 8) is True
     assert sent == [(7, 8, "abs"), (7, 8, "b1c")]
+
+
+# --- #54: coordinate/raw input must not touch AT-SPI by default ---------------
+def test_default_coordinate_click_never_uses_atspi(monkeypatch: Any) -> None:
+    # Atspi.generate_*_event aborts the PROCESS (uncatchable C dbind abort) when
+    # the a11y registry is broken. By default, synthetic input must NOT go there.
+    import cerebellum_cua.capture.input as mod
+
+    monkeypatch.delenv("CEREBELLUM_ATSPI_INPUT", raising=False)
+    monkeypatch.setenv("XDG_SESSION_TYPE", "x11")  # non-Wayland: old code used Atspi
+    rec = _Recorder()
+    monkeypatch.setattr(mod.shutil, "which", lambda n: f"/usr/bin/{n}")
+    monkeypatch.setattr(mod.subprocess, "run", rec.run)
+
+    def _boom(*_a: Any, **_k: Any) -> bool:
+        raise AssertionError("AT-SPI input must not be used by default (#54)")
+
+    monkeypatch.setattr(SyntheticInput, "_atspi_click", _boom)
+    monkeypatch.setattr(SyntheticInput, "_atspi_move", _boom)
+    si = SyntheticInput(speed="instant")
+    assert si.click(10, 20) is True
+    assert rec.calls  # a CLI tool was invoked instead
+
+
+def test_atspi_input_is_opt_in_via_env(monkeypatch: Any) -> None:
+    monkeypatch.setenv("CEREBELLUM_ATSPI_INPUT", "1")
+    monkeypatch.delenv("XDG_SESSION_TYPE", raising=False)
+    si = SyntheticInput(speed="instant")
+    assert si._prefer_ydotool is False  # Atspi route allowed when opted in
