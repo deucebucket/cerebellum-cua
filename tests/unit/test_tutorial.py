@@ -115,7 +115,7 @@ def test_run_tutorial_ordered_timeline_with_offsets() -> None:
     )
     # Two clock reads per step (start, end), plus the origin read.
     clock = _Clock([100.0, 100.0, 102.5, 110.0, 110.5, 120.0, 121.0])
-    result = run_tutorial(engine, tut, clock=clock)
+    result = run_tutorial(engine, tut, clock=clock, sleep=lambda _s: None)
 
     assert result["title"] == "t"
     assert result["success"] is True
@@ -147,7 +147,7 @@ def test_run_tutorial_failing_step_records_not_ok_and_continues() -> None:
         ],
     )
     clock = _Clock([0.0, 0.0, 1.0, 5.0, 6.0])
-    result = run_tutorial(engine, tut, clock=clock)
+    result = run_tutorial(engine, tut, clock=clock, sleep=lambda _s: None)
 
     assert result["success"] is False
     assert result["timeline"][0]["ok"] is False
@@ -164,7 +164,7 @@ def test_run_tutorial_unknown_op_recorded_not_ok() -> None:
         TutorialStep(caption="nope", action="op", name="does_not_exist"),
     ])
     clock = _Clock([0.0, 0.0, 2.0])
-    result = run_tutorial(engine, tut, clock=clock)
+    result = run_tutorial(engine, tut, clock=clock, sleep=lambda _s: None)
     assert result["timeline"][0]["ok"] is False
     assert result["success"] is False
 

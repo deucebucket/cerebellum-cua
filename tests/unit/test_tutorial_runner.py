@@ -36,7 +36,7 @@ def test_runner_records_tokens_and_totals() -> None:
         {"caption": "read", "action": "op", "name": "read_text",
          "args": {}, "hold": 1.0},
     ]})
-    out = run_tutorial(_FakeEngine(), tut, clock=_clock())
+    out = run_tutorial(_FakeEngine(), tut, clock=_clock(), sleep=lambda _s: None)
     tl = out["timeline"]
     assert tl[0]["tokens"] > 0           # real estimate of the skill result
     assert tl[1]["tokens"] > 0
@@ -48,6 +48,6 @@ def test_runner_records_perceived_and_bbox_from_resolved_identity() -> None:
         {"caption": "click open", "action": "skill", "name": "click",
          "args": {"target": "Open"}, "hold": 1.0},
     ]})
-    out = run_tutorial(_FakeEngine(), tut, clock=_clock())
+    out = run_tutorial(_FakeEngine(), tut, clock=_clock(), sleep=lambda _s: None)
     assert out["timeline"][0]["perceived"] == "BUTTON 'Open'"
     assert out["timeline"][0]["bbox"] == [0, 0, 40, 20]

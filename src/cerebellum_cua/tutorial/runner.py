@@ -31,12 +31,15 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
 
 #: A monotonic, no-arg clock returning seconds as a float.
 Clock = Callable[[], float]
+#: Pacing sleep — real on a recording, a no-op (injected) in tests.
+Sleep = Callable[[float], None]
 
 
 def run_tutorial(
     engine: CuaEngine,
     tutorial: Tutorial,
     clock: Clock = time.perf_counter,
+    sleep: Sleep = time.sleep,
 ) -> dict[str, Any]:
     """Run ``tutorial`` step-by-step, returning a captioned timeline.
 
@@ -55,7 +58,7 @@ def run_tutorial(
     timeline: list[dict[str, Any]] = []
     success = True
     for step in tutorial.steps:
-        entry = _run_step(engine, step, clock, origin)
+        entry = _run_step(engine, step, clock, origin, sleep)
         timeline.append(entry)
         success = success and bool(entry["ok"])
     totals = {"a11y_tokens": sum(int(e["tokens"]) for e in timeline)}
@@ -68,9 +71,14 @@ def run_tutorial(
 
 
 def _run_step(
-    engine: CuaEngine, step: TutorialStep, clock: Clock, origin: float
+    engine: CuaEngine, step: TutorialStep, clock: Clock, origin: float, sleep: Sleep
 ) -> dict[str, Any]:
-    """Execute one step and build its timeline entry (never raises)."""
+    """Execute one step, hold its caption for ``hold`` seconds, build its entry.
+
+    The ``sleep`` keeps the resulting screen state (and caption) on screen for the
+    authored ``hold`` so a recording shows each step long enough to read; it is a
+    no-op in unit tests. Never raises — a failed step is recorded ``ok=False``.
+    """
     start = clock() - origin
     ok = True
     summary = ""
@@ -87,6 +95,7 @@ def _run_step(
     except Exception as exc:  # noqa: BLE001 - a step must never crash the run
         ok = False
         summary = f"error: {type(exc).__name__}: {exc}"
+    sleep(max(0.0, float(step.hold)))  # hold the state/caption on screen
     end = max(clock() - origin, start + step.hold)
     return {
         "caption": step.caption,
