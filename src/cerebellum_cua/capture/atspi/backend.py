@@ -82,6 +82,20 @@ class AtspiCaptureBackend(CaptureBackend):
 
     name = "atspi"
 
+    #: How many application accessibles the registry exposed / matched the target
+    #: on the most recent ``_roots`` call. ``None`` until the first capture.
+    _registry_app_count: int | None = None
+    _matched_root_count: int | None = None
+
+    def last_capture_diagnostics(self) -> dict[str, Any] | None:
+        """Registry/root counts from the last capture (see base class)."""
+        if self._registry_app_count is None:
+            return None
+        return {
+            "registry_app_count": self._registry_app_count,
+            "matched_root_count": self._matched_root_count,
+        }
+
     def is_available(self) -> bool:
         """True only if ``gi``/``Atspi`` import AND the a11y bus probe succeed.
 
@@ -131,6 +145,9 @@ class AtspiCaptureBackend(CaptureBackend):
             count = desktop.get_child_count()
         except Exception as exc:  # noqa: BLE001
             raise CaptureNotAvailable(f"desktop unreadable: {exc}") from exc
+        # Record how many apps the registry exposed so an empty capture can be
+        # explained (registry empty vs. target matched nothing) downstream.
+        self._registry_app_count = count
 
         for i in range(count):
             try:
@@ -152,12 +169,16 @@ class AtspiCaptureBackend(CaptureBackend):
                 except Exception:  # noqa: BLE001
                     continue
             roots.append(app)
+        self._matched_root_count = len(roots)
         return roots
 
     def iter_tree(
         self, target: dict[str, Any], config: MatrixConfig
     ) -> Iterator[CaptureNode]:
         """Pre-order DFS over the selected AT-SPI subtree(s)."""
+        # Clear stale diagnostics so a failure before _roots leaves them unset.
+        self._registry_app_count = None
+        self._matched_root_count = None
         atspi = self._atspi()
         coord_screen = atspi.CoordType.SCREEN
         roots = self._roots(atspi, target)

@@ -86,13 +86,41 @@ Success response payload (shape produced by the engine's build path):
   "build_duration_ms": 0,
   "degraded_branches": 0,
   "root_elements": [0, 1, 2],
+  "capture_backend": "atspi",
+  "degraded": false,
   "status": "success"
 }
 ```
 
 `root_elements` is the list of row ids at depth <= 1. `build_duration_ms` is the
-measured capture+build time (0 in the seeded example above). On a host with no
-runnable capture backend the same request returns:
+measured capture+build time (0 in the seeded example above). `capture_backend` is
+the backend that actually produced the snapshot; `degraded` is `true` when an
+`auto` request fell back to the `vision` backend because the OS-default a11y
+backend was unavailable.
+
+When `total_elements` is `0` the payload also carries a `diagnostics` object
+explaining the empty result — a 0-element capture is far more often an a11y tree
+exposing nothing than a genuinely blank screen, so do **not** treat it as "the
+screen is empty":
+
+```json
+{
+  "snapshot_id": 1, "epoch": 1, "total_elements": 0, "root_elements": [],
+  "capture_backend": "atspi", "degraded": false, "status": "success",
+  "diagnostics": {
+    "empty": true,
+    "capture_backend": "atspi",
+    "reason": "atspi_registry_empty",
+    "hint": "The AT-SPI accessibility registry exposed 0 applications ... export QT_ACCESSIBILITY=1 ..."
+  }
+}
+```
+
+`reason` is one of `atspi_registry_empty` (the bus is reachable but no apps are
+registered — usually apps not publishing a11y trees), `no_root_matched_target`
+(apps exist but none matched the `target`), `all_elements_filtered` (roots walked
+but nothing survived the depth/visibility filter), or `no_elements` (other
+backends). On a host with no runnable capture backend the same request returns:
 
 ```json
 {

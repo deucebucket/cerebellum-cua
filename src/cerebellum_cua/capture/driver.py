@@ -66,4 +66,9 @@ def capture_snapshot(
     snapshot = build_snapshot(walked, epoch, target=target, config=config)
     snapshot.build_duration_ms = int((time.perf_counter() - start) * 1000)
     snapshot.metadata.setdefault("capture_backend", backend.name)
+    # Optional, best-effort: a backend may report why a capture was empty.
+    diag_fn = getattr(backend, "last_capture_diagnostics", None)
+    diagnostics = diag_fn() if callable(diag_fn) else None
+    if diagnostics:
+        snapshot.metadata["capture_diagnostics"] = diagnostics
     return snapshot

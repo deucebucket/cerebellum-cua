@@ -281,6 +281,72 @@ def test_build_matrix_explicit_backend_does_not_degrade(
     assert resp["error"]["code"] == 1006
 
 
+def _patch_empty_atspi(monkeypatch: Any, diagnostics: dict[str, Any]) -> None:
+    """Stub a *successful* atspi capture that yields zero elements, reporting the
+    given registry/root diagnostics (the 'bus reachable but empty' case)."""
+    import cerebellum_cua.capture as cap
+
+    class _EmptyAtspi:
+        name = "atspi"
+
+        def is_available(self) -> bool:
+            return True
+
+        def iter_tree(self, target: Any, config: Any) -> Any:
+            return iter(())
+
+        def last_capture_diagnostics(self) -> dict[str, Any]:
+            return diagnostics
+
+    monkeypatch.setattr(cap, "get_capture_backend", lambda kind="auto": _EmptyAtspi())
+
+
+def test_empty_atspi_capture_flags_registry_empty(
+    engine: CuaEngine, monkeypatch: Any
+) -> None:
+    # Bus reachable but the a11y registry exposes 0 apps: a 0-element capture must
+    # be flagged as empty-with-cause, not pass as a bare silent success.
+    _patch_empty_atspi(monkeypatch, {"registry_app_count": 0, "matched_root_count": 0})
+    resp = _call(engine, "build_matrix", {"target": {}})
+    assert resp["error"] is None
+    p = resp["payload"]
+    assert p["total_elements"] == 0
+    assert p["status"] == "success"
+    assert p["diagnostics"]["empty"] is True
+    assert p["diagnostics"]["reason"] == "atspi_registry_empty"
+    assert "QT_ACCESSIBILITY" in p["diagnostics"]["hint"]
+
+
+def test_empty_atspi_capture_flags_target_mismatch(
+    engine: CuaEngine, monkeypatch: Any
+) -> None:
+    # Apps exist on the registry but none matched the requested target.
+    _patch_empty_atspi(monkeypatch, {"registry_app_count": 3, "matched_root_count": 0})
+    resp = _call(engine, "build_matrix", {"target": {"app_name": "Nope"}})
+    p = resp["payload"]
+    assert p["diagnostics"]["reason"] == "no_root_matched_target"
+
+
+def test_empty_atspi_capture_flags_all_filtered(
+    engine: CuaEngine, monkeypatch: Any
+) -> None:
+    # Roots matched but produced no elements (no accessible content / over-filter).
+    _patch_empty_atspi(monkeypatch, {"registry_app_count": 1, "matched_root_count": 1})
+    resp = _call(engine, "build_matrix", {"target": {}})
+    p = resp["payload"]
+    assert p["diagnostics"]["reason"] == "all_elements_filtered"
+
+
+def test_nonempty_capture_has_no_diagnostics(
+    engine: CuaEngine, monkeypatch: Any
+) -> None:
+    # A capture that yields elements must NOT carry an empty-capture diagnostic.
+    _patch_backends(monkeypatch, vision_ok=True)
+    resp = _call(engine, "build_matrix", {"target": {}})  # degrades to vision -> 1 elem
+    assert resp["payload"]["total_elements"] == 1
+    assert "diagnostics" not in resp["payload"]
+
+
 def test_invoke_action_unreacquirable_returns_clean_typed_error(
     engine: CuaEngine, monkeypatch: Any
 ) -> None:

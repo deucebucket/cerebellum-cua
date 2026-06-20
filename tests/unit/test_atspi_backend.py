@@ -415,6 +415,71 @@ def test_walk_to_rows_dense_rows_and_parent_links() -> None:
     assert parents[3] == 1
 
 
+class _FakeApp:
+    def __init__(self, name: str, pid: int = 1) -> None:
+        self._name = name
+        self._pid = pid
+
+    def get_name(self) -> str:
+        return self._name
+
+    def get_process_id(self) -> int:
+        return self._pid
+
+
+class _FakeDesktop:
+    def __init__(self, apps: list[Any]) -> None:
+        self._apps = apps
+
+    def get_child_count(self) -> int:
+        return len(self._apps)
+
+    def get_child_at_index(self, i: int) -> Any:
+        return self._apps[i]
+
+
+def _fake_atspi_module(apps: list[Any]) -> Any:
+    class _Mod:
+        @staticmethod
+        def get_desktop(_i: int) -> Any:
+            return _FakeDesktop(apps)
+
+    return _Mod()
+
+
+def test_roots_records_registry_counts_when_empty() -> None:
+    # The 'bus reachable but registry empty' case: 0 apps -> diagnostics say so.
+    backend = AtspiCaptureBackend()
+    roots = backend._roots(_fake_atspi_module([]), {})
+    assert roots == []
+    assert backend.last_capture_diagnostics() == {
+        "registry_app_count": 0,
+        "matched_root_count": 0,
+    }
+
+
+def test_roots_records_registry_counts_with_target_mismatch() -> None:
+    backend = AtspiCaptureBackend()
+    apps = [_FakeApp("Files"), _FakeApp("Editor")]
+    roots = backend._roots(_fake_atspi_module(apps), {"app_name": "Nope"})
+    assert roots == []
+    diag = backend.last_capture_diagnostics()
+    assert diag == {"registry_app_count": 2, "matched_root_count": 0}
+
+
+def test_roots_records_registry_counts_when_matched() -> None:
+    backend = AtspiCaptureBackend()
+    apps = [_FakeApp("Files"), _FakeApp("Editor")]
+    roots = backend._roots(_fake_atspi_module(apps), {"app_name": "Editor"})
+    assert len(roots) == 1
+    diag = backend.last_capture_diagnostics()
+    assert diag == {"registry_app_count": 2, "matched_root_count": 1}
+
+
+def test_last_capture_diagnostics_none_before_capture() -> None:
+    assert AtspiCaptureBackend().last_capture_diagnostics() is None
+
+
 def test_invoke_uses_action_interface() -> None:
     btn = FakeAtspi(role="push button", name="OK", interfaces={"Action"})
     el = convert(btn)

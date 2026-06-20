@@ -44,6 +44,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `degraded` flag. A pinned `capture_backend` never silently degrades. The
   `capture_unavailable` (1006) message now states exact per-backend
   remediation. (#50)
+- `build_matrix` now attaches a `diagnostics` object whenever a capture yields
+  `total_elements: 0`, explaining the cause (`atspi_registry_empty`,
+  `no_root_matched_target`, `all_elements_filtered`, or `no_elements`) with
+  remediation, so an empty a11y tree is no longer mistaken for a blank screen.
+  The AT-SPI backend records how many apps the registry exposed vs. matched the
+  target to make the reason accurate.
 
 ### Fixed
 - SQLite `sqlite://` DSN parsing stripped *every* leading slash, making absolute
