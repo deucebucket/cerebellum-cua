@@ -45,6 +45,40 @@ def _escape_drawtext_text(text: str) -> str:
     return out
 
 
+def compose_caption(entry: dict[str, Any]) -> str:
+    """Build the on-screen text for one timeline entry.
+
+    A plain entry renders just its caption. When stats are present, append a
+    ``perceived`` line and a three-way token line (a11y matrix vs focused shot vs
+    full shot). All numbers are estimates produced upstream.
+    """
+    lines = [str(entry.get("caption", ""))]
+    perceived = str(entry.get("perceived", "")).strip()
+    if perceived:
+        lines.append(f"perceived: {perceived}")
+    a11y = entry.get("tokens")
+    if a11y is not None and entry.get("full_tokens") is not None:
+        shot = entry.get("shot_tokens")
+        full = entry.get("full_tokens")
+        shot_part = f" · focused ~{shot}" if shot is not None else ""
+        lines.append(f"matrix ~{a11y} tok{shot_part} · full shot ~{full}")
+    return "\n".join(lines)
+
+
+def summary_card(totals: dict[str, Any]) -> str:
+    """Closing card: three-way totals + the matrix-vs-full-shot ratio."""
+    a11y = int(totals.get("a11y_tokens", 0))
+    shot = int(totals.get("shot_tokens", 0))
+    full = int(totals.get("full_tokens", 0))
+    ratio = (full / a11y) if a11y else 0.0
+    return (
+        "perceived via the accessibility tree — no pixels\n"
+        f"a11y matrix ~{a11y} tok · focused shots ~{shot} · "
+        f"full screenshots ~{full}\n"
+        f"~{ratio:.1f}x cheaper than full screenshots (estimates)"
+    )
+
+
 def build_drawtext_filter(timeline: list[dict[str, Any]], *, fontsize: int = 28) -> str:
     """Build the ffmpeg ``drawtext`` chain that shows each caption in its window.
 
@@ -60,7 +94,7 @@ def build_drawtext_filter(timeline: list[dict[str, Any]], *, fontsize: int = 28)
     """
     filters: list[str] = []
     for entry in timeline:
-        text = _escape_drawtext_text(str(entry["caption"]))
+        text = _escape_drawtext_text(compose_caption(entry))
         start = float(entry["start"])
         end = float(entry["end"])
         filters.append(
@@ -115,4 +149,4 @@ def burn_captions(
     return out_path
 
 
-__all__ = ["build_drawtext_filter", "burn_captions"]
+__all__ = ["build_drawtext_filter", "burn_captions", "compose_caption", "summary_card"]
