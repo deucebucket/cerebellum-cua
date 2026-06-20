@@ -10,10 +10,15 @@ cerebellum-cua navigates a real application (gedit) — typing, clicking a toolb
 button, opening the hamburger menu, and selecting a menu item — driven entirely
 through the accessibility tree (no screenshots in the perception loop). On-screen
 captions show, per step, the element CUA perceived and the **real** token cost of
-that step, contrasted with what an equivalent screenshot would cost. A closing
-card gives the **overall total and comparison**. The video is produced by the rig
-that runs CUA, and a short written piece explains that the demo drove and recorded
+that step, contrasted with what a screenshot would cost — both a **focused**
+(cropped-to-the-element) screenshot and a **full** screenshot. A closing card
+gives the **overall total and comparison**. The video is produced by the rig that
+runs CUA, and a short written piece explains that the demo drove and recorded
 itself.
+
+This work also adds a real capability — **focused (region/element) screenshots**
+(§12) — so the comparison is a fair three-way (structured a11y matrix · focused
+pixels for one widget · full-screen pixels), not a strawman against a giant image.
 
 The deeper goal: the menu/click navigation is deliberately the hard path. Wherever
 it flakes, that is a real weakness in the tool to fix. The flow must be **dialed in
@@ -30,8 +35,10 @@ proves it.
 - Per-step token numbers are real (measured from the same run that is recorded),
   not fabricated; the screenshot-equivalent is a clearly-labeled estimate from a
   documented formula.
-- A closing card shows total a11y tokens, total screenshot-equivalent tokens, and
-  the ratio.
+- A closing card shows the **three-way** total: a11y matrix tokens, focused-shot
+  tokens, full-shot tokens, and the ratio.
+- The focused-screenshot capability works (crops to a `region`/`row_id` bbox) and
+  is covered by tests; full-screen behavior is unchanged when no region is given.
 - The token comparison is **fair**: it states honestly what each side does and
   does not include (see §6). No strawman.
 - The artifact looks professional: clean captions, no glitches, sensible pacing.
@@ -48,8 +55,10 @@ to be confirmed/adjusted by probing:
 4. `skill click` (Menu/hamburger) — open the popover menu; **re-capture** so the
    popover's items exist as perceived elements.
 5. `skill click` — select a menu item from the now-perceived popover.
-6. `op read_text` — read the screen back, proving perception.
-7. `pause` — closing meta card + the summary numbers.
+6. `op screenshot` with `row_id` — a **focused** screenshot cropped to the element
+   just acted on, demonstrating "pixels for one widget" (and its small token cost).
+7. `op read_text` — read the screen back, proving perception.
+8. `pause` — closing meta card + the summary numbers (three-way total).
 
 Exact targets are finalized by the probe pass, not assumed here.
 
@@ -82,10 +91,13 @@ Extend the existing tutorial pipeline (no new parallel system):
   from `{caption, perceived, tokens, screenshot_equiv}` as a tidy multi-line block,
   and render a **final summary card** (total a11y tokens, total screenshot-
   equivalent, ratio) shown during the closing window.
-- **Screenshot-equivalent helper** (`tutorial/tokens.py`): a small pure function converting frame
-  dimensions to an image-token estimate using a **documented, cited formula**
-  (Anthropic's `tokens ≈ (w·h)/750`; for the rig's 1280×800 ≈ ~1,365 tok/frame),
+- **Image-token helper** (`tutorial/tokens.py`): a small pure function converting
+  ANY frame dimensions to an image-token estimate using a **documented, cited
+  formula** (Anthropic's `tokens ≈ (w·h)/750`; full screen at the rig's 1280×800 ≈
+  ~1,365 tok; a focused element crop is far less, scaling with its bbox area),
   reusing/extending `docs/BENCHMARKS.md` methodology. Always labeled "estimate".
+  This same helper prices both the focused-shot and full-shot sides of the
+  three-way comparison from real bbox/frame dimensions.
 
 All new functions are pure where possible and unit-tested with injected values —
 no ffmpeg, no live engine needed for the token/caption math.
@@ -96,13 +108,17 @@ The closing card and the written explainer state plainly:
 
 - The a11y figure is the estimated tokens of the **structured matrix response**
   CUA actually sends (names, roles, actions, geometry) — already actionable.
-- The screenshot figure is the estimated **image tokens** a vision model would
-  spend to ingest one frame at the same resolution — before it has inferred any
-  structure, names, or affordances.
-- Both are estimates (heuristic char/token and a published image-token formula),
+- The **focused-shot** figure is the estimated image tokens for a screenshot
+  cropped to just the element in question — the cheapest *pixel* option, which
+  this work makes possible (§12).
+- The **full-shot** figure is the estimated image tokens for one whole frame at
+  the session resolution — before a vision model has inferred any structure,
+  names, or affordances.
+- All are estimates (heuristic char/token and a published image-token formula),
   labeled as such. We are comparing "tokens to perceive this screen", and we say
-  so. We do **not** claim screenshots are useless — the tool itself offers a
-  screenshot/vision path for non-accessible UIs.
+  so. We do **not** claim screenshots are useless — the tool itself offers
+  screenshot/focused-screenshot/vision paths for non-accessible UIs; the point is
+  that the a11y tree is the cheapest *and* most structured default.
 
 ## 7. Pipeline & deliverables
 
@@ -111,13 +127,15 @@ The closing card and the written explainer state plainly:
   to overlay → `mp4`.
 - Generate a `gif` (capped frames/size) for the README from the mp4.
 - Deliverables:
+  - **Focused screenshot capability** (§12): `region`/`row_id` on the `screenshot`
+    op + MCP tool + per-grabber geometry, with tests.
   - `examples/tutorials/gedit_drive.json` — the verified flow.
-  - Token/caption extension in `tutorial/runner.py`, `tutorial/captions.py`, plus a
-    screenshot-equivalent helper, all with tests.
+  - Token/caption extension in `tutorial/runner.py`, `tutorial/captions.py`, plus the
+    `tutorial/tokens.py` image-token helper, all with tests.
   - Any zero-flake fixes to the skills/resolver/reacquire path, with tests.
   - `docs/assets/cua-drive.mp4` + `docs/assets/cua-drive.gif`.
   - Written explainer in `docs/TUTORIALS.md` (+ a README line) describing the
-    self-recorded demo and the token tally.
+    self-recorded demo and the three-way token tally.
 
 ## 8. Verification
 
@@ -131,9 +149,12 @@ The closing card and the written explainer state plainly:
 
 | File | Change |
 |------|--------|
+| `src/cerebellum_cua/capture/screenshot.py` | `region=(x,y,w,h)` crop via per-grabber geometry (ffmpeg/grim/scrot/import) |
+| `src/cerebellum_cua/cli/handlers.py` | `screenshot` op accepts `region` or `row_id`(+`snapshot_id`) → bbox lookup → crop |
+| `src/cerebellum_cua/mcp/_tools.py` | expose `region`/`row_id` on the `screenshot` MCP tool |
 | `src/cerebellum_cua/tutorial/runner.py` | record per-step `tokens` + `perceived`; accumulate totals |
 | `src/cerebellum_cua/tutorial/captions.py` | compose multi-line captions from stats; final summary card |
-| `src/cerebellum_cua/tutorial/tokens.py` | pure screenshot-equivalent token estimate |
+| `src/cerebellum_cua/tutorial/tokens.py` | pure image-token estimate (focused + full) |
 | `src/cerebellum_cua/skills/*` / resolver / `capture/.../reacquire` | only as zero-flake fixes require (root-caused) |
 | `examples/tutorials/gedit_drive.json` | the verified flow |
 | `docs/TUTORIALS.md`, `README.md` | explainer + asset |
@@ -141,9 +162,10 @@ The closing card and the written explainer state plainly:
 
 ## 10. Testing
 
-- TDD units: per-step token recording (runner), caption composition with a stat
-  line, summary-card rendering, screenshot-equivalent formula, and every
-  zero-flake fix.
+- TDD units: focused-screenshot region cropping (per-grabber argv geometry, bbox
+  lookup from `row_id`, guarded errors), per-step token recording (runner), caption
+  composition with a stat line, summary-card rendering, image-token formula, and
+  every zero-flake fix.
 - Reliability: the probe harness must show 5 consecutive clean runs in the rig
   before recording (recorded as evidence, not a unit test).
 - Full suite + ruff + mypy stay green.
@@ -156,3 +178,39 @@ The closing card and the written explainer state plainly:
   scripted tutorial. (The "agent" is the scripted driver; we do not claim an
   autonomous model is reasoning.)
 - No fabricated numbers; no over-claiming in the comparison.
+
+## 12. Added scope: focused (region/element) screenshots
+
+A real capability added with this work (not just for the demo): grab a screenshot
+of **only the region in question** instead of the whole screen — far fewer pixels,
+far fewer image tokens, and a natural complement to the a11y tree (which already
+knows every element's bounding box).
+
+**API.** The `screenshot` op (and its MCP tool) gains two optional, mutually
+exclusive ways to scope the capture:
+
+- `region: [x, y, w, h]` — crop to an explicit rectangle.
+- `row_id` (+ optional `snapshot_id`) — look up that element's stored
+  `bounding_rect` in the snapshot and crop to it. The common path: `build_matrix`,
+  then `screenshot(row_id=N)` for "show me just that widget".
+
+No args → full-screen, exactly as today (backward compatible).
+
+**Cropping.** Done at grab time via each grabber's geometry flags, so the captured
+image really is smaller (not a full grab post-cropped):
+
+- ffmpeg x11grab: `-video_size {w}x{h} -i {disp}+{x},{y}`
+- grim: `grim -g "{x},{y} {w}x{h}"`
+- scrot: `scrot -a {x},{y},{w},{h}`
+- ImageMagick import: `import -window root -crop {w}x{h}+{x}+{y}`
+- spectacle (Wayland fallback): region capture is interactive/headless-unfriendly —
+  fall back to full-screen and note it in the result, never fail silently.
+
+**Result.** Same shape as today (`{path, width, height}`), where width/height now
+reflect the cropped image, plus an echoed `region` so the caller knows what was
+captured. Out-of-bounds / zero-area regions are clamped to the frame or raise a
+typed error — never produce a corrupt grab.
+
+**Why it matters here.** It lets the demo show a fair three-way token comparison
+(matrix vs focused shot vs full shot) and gives agents a cheap "look closely at
+this one thing" option that pairs with the a11y tree instead of competing with it.
