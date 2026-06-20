@@ -99,6 +99,69 @@ def test_iter_tree_drives_into_matrix_rows(patched_capture: None) -> None:
     assert any(p is not None for p in parents)
 
 
+# --- empty/degenerate capture must not masquerade as success (issue #51) ------
+def test_iter_tree_raises_when_image_undecodable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """cv2 absent -> load_image returns None -> explicit CaptureNotAvailable."""
+    import cerebellum_cua.capture.screenshot as shot
+    import cerebellum_cua.capture.vision.detect as detect
+    from cerebellum_cua.capture.base import CaptureNotAvailable
+
+    monkeypatch.setattr(
+        shot, "grab_screenshot",
+        lambda path, display=None: {"path": path, "width": 800, "height": 600},
+    )
+    monkeypatch.setattr(shot, "default_screenshot_path", lambda: "/tmp/fake.png")
+    monkeypatch.setattr(detect, "load_image", lambda path: None)
+
+    backend = VisionCaptureBackend()
+    with pytest.raises(CaptureNotAvailable):
+        list(backend.iter_tree({}, MatrixConfig()))
+
+
+def test_iter_tree_raises_on_zero_elements_without_ocr(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Zero detected elements AND no OCR engine -> error, not empty success."""
+    import cerebellum_cua.capture.screenshot as shot
+    import cerebellum_cua.capture.vision.detect as detect
+    from cerebellum_cua.capture.base import CaptureNotAvailable
+
+    monkeypatch.setattr(
+        shot, "grab_screenshot",
+        lambda path, display=None: {"path": path, "width": 800, "height": 600},
+    )
+    monkeypatch.setattr(shot, "default_screenshot_path", lambda: "/tmp/fake.png")
+    monkeypatch.setattr(detect, "load_image", lambda path: object())
+    monkeypatch.setattr(detect, "detect_regions", lambda image: [])
+    monkeypatch.setattr(VisionCaptureBackend, "_has_tesseract", staticmethod(lambda: False))
+
+    backend = VisionCaptureBackend()
+    with pytest.raises(CaptureNotAvailable):
+        list(backend.iter_tree({}, MatrixConfig()))
+
+
+def test_iter_tree_allows_genuinely_empty_screen_with_ocr(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Engines present but the screen is blank -> empty result is legitimate."""
+    import cerebellum_cua.capture.screenshot as shot
+    import cerebellum_cua.capture.vision.detect as detect
+
+    monkeypatch.setattr(
+        shot, "grab_screenshot",
+        lambda path, display=None: {"path": path, "width": 800, "height": 600},
+    )
+    monkeypatch.setattr(shot, "default_screenshot_path", lambda: "/tmp/fake.png")
+    monkeypatch.setattr(detect, "load_image", lambda path: object())
+    monkeypatch.setattr(detect, "detect_regions", lambda image: [])
+    monkeypatch.setattr(VisionCaptureBackend, "_has_tesseract", staticmethod(lambda: True))
+
+    backend = VisionCaptureBackend()
+    assert list(backend.iter_tree({}, MatrixConfig())) == []
+
+
 # --- is_available: clean False when deps missing ------------------------------
 def test_is_available_false_without_deps(monkeypatch: pytest.MonkeyPatch) -> None:
     backend = VisionCaptureBackend()

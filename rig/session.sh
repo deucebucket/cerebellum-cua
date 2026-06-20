@@ -34,6 +34,56 @@ APP_WARMUP="${APP_WARMUP:-4}"
 VIDEO_SIZE="${SCREEN_SIZE%x*}"
 DISPLAY_NUM="${DISPLAY:-:99}"
 
+# ---------------------------------------------------------------------------
+# Dependency preflight: fail fast with explicit install guidance when a binary
+# the rig needs is missing. The rig image (rig/Containerfile) bundles all of
+# these; this check matters when session.sh is run directly on a host. Without
+# it the session half-starts and dies deep in Xvfb/ffmpeg with no clear cause.
+# ---------------------------------------------------------------------------
+preflight() {
+  # binary -> "what it provides | debian pkg | fedora pkg"
+  local -a needed=(
+    "Xvfb|virtual X display|xvfb|xorg-x11-server-Xvfb"
+    "xdpyinfo|X readiness probe|x11-utils|xorg-x11-utils"
+    "dbus-launch|session bus|dbus-x11|dbus-x11"
+    "openbox|window manager|openbox|openbox"
+    "ffmpeg|screen record/screenshot|ffmpeg|ffmpeg"
+    "python3|demo runner|python3|python3"
+  )
+  if [ "${STREAM:-0}" = "1" ]; then
+    needed+=(
+      "x11vnc|VNC server (STREAM)|x11vnc|x11vnc"
+      "websockify|noVNC web proxy (STREAM)|websockify|python3-websockify"
+    )
+  fi
+
+  local missing=0 deb="" fed=""
+  for spec in "${needed[@]}"; do
+    IFS='|' read -r bin what dpkg fpkg <<<"$spec"
+    if ! command -v "$bin" >/dev/null 2>&1; then
+      echo "  missing: $bin ($what)" >&2
+      deb="$deb $dpkg"; fed="$fed $fpkg"; missing=1
+    fi
+  done
+  # at-spi-bus-launcher ships under libexec, not on PATH — check both.
+  if [ ! -x /usr/libexec/at-spi-bus-launcher ] \
+      && ! command -v at-spi-bus-launcher >/dev/null 2>&1; then
+    echo "  missing: at-spi-bus-launcher (a11y bus)" >&2
+    deb="$deb at-spi2-core"; fed="$fed at-spi2-core"; missing=1
+  fi
+
+  if [ "$missing" -eq 1 ]; then
+    {
+      echo "error: rig dependencies are missing on this host."
+      echo "install (Debian/Ubuntu): sudo apt-get install -y$deb"
+      echo "install (Fedora):        sudo dnf install -y$fed"
+      echo "or run the rig in its container instead: scripts/run-vm.sh"
+    } >&2
+    exit 3
+  fi
+}
+preflight
+
 mkdir -p "$OUT"
 
 # 1. virtual X display

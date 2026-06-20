@@ -38,6 +38,25 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   against raw IUIAutomation COM that does not exist in the library). **Validated
   on real Windows 11**: captures the live interactive desktop (184 elements,
   correct control-type mapping). (#5)
+- `build_matrix` in `auto` mode now degrades to the `vision` backend when the
+  OS-default a11y backend is unavailable and vision is usable, instead of
+  hard-failing; the response reports the `capture_backend` actually used and a
+  `degraded` flag. A pinned `capture_backend` never silently degrades. The
+  `capture_unavailable` (1006) message now states exact per-backend
+  remediation. (#50)
+
+### Fixed
+- SQLite `sqlite://` DSN parsing stripped *every* leading slash, making absolute
+  paths impossible (`sqlite:////abs.db` crashed; `sqlite:///abs.db` silently
+  went relative). Now follows the SQLAlchemy convention:
+  `sqlite:////abs.db` → `/abs.db`, `sqlite:///rel.db` → `rel.db`. (#49)
+- The `vision` backend returned `status: success` with `total_elements: 0` when
+  OpenCV/Tesseract were missing, masking the failure. It now raises an explicit
+  `1006` with the exact missing dependencies. (#51)
+- `rig/session.sh` now preflights its runtime binaries (Xvfb, openbox,
+  at-spi-bus-launcher, ffmpeg, and x11vnc/websockify under `STREAM=1`) and fails
+  fast with per-distro install commands; `scripts/run-vm.sh` checks for
+  `podman`. Required system packages are documented in the README. (#52)
 
 ## [0.1.0] - 2026-06-13
 

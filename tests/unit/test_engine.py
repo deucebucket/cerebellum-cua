@@ -201,6 +201,86 @@ def test_build_matrix_unavailable_backend_returns_clean_typed_error(
     assert resp["error"]["details"]["reason"] == "capture_unavailable"
 
 
+def _patch_backends(monkeypatch: Any, *, vision_ok: bool) -> None:
+    """Stub the capture seam: the OS-default backend always fails; vision is
+    available iff ``vision_ok`` and yields a single element when used."""
+    import cerebellum_cua.capture as cap
+    from cerebellum_cua.capture.base import CapturedElement, CaptureNotAvailable
+    from cerebellum_cua.model import BoundingRect, ControlType
+
+    class _FailBackend:
+        name = "atspi"
+
+        def is_available(self) -> bool:
+            return False
+
+        def iter_tree(self, target: Any, config: Any) -> Any:
+            raise CaptureNotAvailable("a11y bus unreachable")
+            yield  # pragma: no cover - marks this a generator
+
+    class _VisionStub:
+        name = "vision"
+
+        def is_available(self) -> bool:
+            return vision_ok
+
+        def iter_tree(self, target: Any, config: Any) -> Any:
+            yield (
+                CapturedElement(
+                    control_type=int(ControlType.BUTTON),
+                    name="OK",
+                    bounding_rect=BoundingRect(left=0, top=0, width=10, height=10),
+                ),
+                0,
+                None,
+            )
+
+    def _get(kind: str = "auto") -> Any:
+        return _VisionStub() if kind == "vision" else _FailBackend()
+
+    monkeypatch.setattr(cap, "get_capture_backend", _get)
+
+
+def test_build_matrix_auto_degrades_to_vision_when_a11y_bus_down(
+    engine: CuaEngine, monkeypatch: Any
+) -> None:
+    # auto mode + unreachable a11y bus, but vision is available -> the primary op
+    # must succeed via the vision backend rather than hard-failing (issue #50).
+    _patch_backends(monkeypatch, vision_ok=True)
+    resp = _call(engine, "build_matrix", {"target": {}})
+    assert resp["error"] is None
+    assert resp["payload"]["status"] == "success"
+    assert resp["payload"]["capture_backend"] == "vision"
+    assert resp["payload"]["degraded"] is True
+    assert resp["payload"]["total_elements"] == 1
+
+
+def test_build_matrix_auto_no_fallback_gives_actionable_error(
+    engine: CuaEngine, monkeypatch: Any
+) -> None:
+    # auto mode, neither backend usable -> a clean 1006 whose message states the
+    # exact remediation for BOTH the a11y bus and the vision backend.
+    _patch_backends(monkeypatch, vision_ok=False)
+    resp = _call(engine, "build_matrix", {"target": {}})
+    assert resp["payload"] is None
+    assert resp["error"]["code"] == 1006
+    assert resp["error"]["details"]["reason"] == "capture_unavailable"
+    detail = resp["error"]["details"]["detail"].lower()
+    assert "org.a11y.bus" in detail
+    assert "vision" in detail
+
+
+def test_build_matrix_explicit_backend_does_not_degrade(
+    engine: CuaEngine, monkeypatch: Any
+) -> None:
+    # A pinned backend must NOT silently switch to vision: the caller asked for a
+    # specific data shape, so an unavailable pinned backend stays an error.
+    _patch_backends(monkeypatch, vision_ok=True)
+    resp = _call(engine, "build_matrix", {"capture_backend": "atspi"})
+    assert resp["payload"] is None
+    assert resp["error"]["code"] == 1006
+
+
 def test_invoke_action_unreacquirable_returns_clean_typed_error(
     engine: CuaEngine, monkeypatch: Any
 ) -> None:
