@@ -214,6 +214,19 @@ def test_click_resolves_and_invokes(engine: CuaEngine, monkeypatch: Any) -> None
     assert calls[0]["action"] == "click"
 
 
+def test_skill_result_carries_resolved_identity(
+    engine: CuaEngine, monkeypatch: Any
+) -> None:
+    # The result names what was resolved (useful for agents + the demo captions):
+    # role, name, and on-screen bbox of the acted element.
+    engine.register_seed(_form_snapshot())
+    _stub_invoke(engine, monkeypatch)
+    result = click(engine, name="Save")
+    assert result["resolved_name"] == "Save"
+    assert result["resolved_role"] == "BUTTON"
+    assert result["resolved_bbox"] == [0, 0, 40, 20]  # _elem_dict default bbox
+
+
 def test_type_into_sets_text(engine: CuaEngine, monkeypatch: Any) -> None:
     engine.register_seed(_form_snapshot())
     calls = _stub_invoke(engine, monkeypatch)

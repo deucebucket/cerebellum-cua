@@ -105,7 +105,28 @@ def _invoke(
         if fallback is not None:
             return fallback
         raise
-    return {"skill": skill, "resolved_row_id": element.row_id, **result}
+    return {"skill": skill, **_identity(element), **result}
+
+
+def _identity(element: Element) -> dict[str, Any]:
+    """Resolved-target fields shared by every skill result: row, role, name, bbox.
+
+    Naming what got resolved is useful for any agent (and lets the demo caption +
+    focused-screenshot math read the element's box without a snapshot re-lookup).
+    """
+    from cerebellum_cua.model import ControlType  # noqa: PLC0415 - avoid cycle
+
+    try:
+        role = ControlType(element.control_type).name
+    except ValueError:
+        role = str(element.control_type)
+    rect = element.bounding_rect
+    return {
+        "resolved_row_id": element.row_id,
+        "resolved_role": role,
+        "resolved_name": element.name,
+        "resolved_bbox": [rect.left, rect.top, rect.width, rect.height],
+    }
 
 
 def _coordinate_fallback(
@@ -135,7 +156,7 @@ def _coordinate_fallback(
     )
     return {
         "skill": skill,
-        "resolved_row_id": element.row_id,
+        **_identity(element),
         "fallback": "coordinate_click",
         **result,
     }

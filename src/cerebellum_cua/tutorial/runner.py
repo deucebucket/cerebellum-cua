@@ -76,12 +76,14 @@ def _run_step(
     summary = ""
     tokens = 0
     perceived = ""
+    bbox: list[int] | None = None
     try:
         result = _dispatch(engine, step)
         ok = _step_ok(result)
         summary = _summarize(result)
         tokens = estimate_tokens(result) if result is not None else 0
         perceived = _perceived(result)
+        bbox = _bbox(result)
     except Exception as exc:  # noqa: BLE001 - a step must never crash the run
         ok = False
         summary = f"error: {type(exc).__name__}: {exc}"
@@ -93,19 +95,31 @@ def _run_step(
         "ok": ok,
         "tokens": tokens,
         "perceived": perceived,
+        "bbox": bbox,
         "result_summary": summary,
     }
 
 
 def _perceived(result: Any) -> str:
-    """Best-effort label of the element a step acted on / perceived."""
+    """Label of the element a step acted on, e.g. ``BUTTON 'Open'`` (else "")."""
     if not isinstance(result, dict):
         return ""
-    for key in ("name", "target", "resolved", "title"):
-        val = result.get(key)
-        if isinstance(val, str) and val.strip():
-            return val.strip()
+    name = result.get("resolved_name")
+    role = result.get("resolved_role")
+    if role and name:
+        return f"{role} '{name}'"
+    if isinstance(role, str) and role:
+        return role
     return ""
+
+
+def _bbox(result: Any) -> list[int] | None:
+    """The acted element's box (skill ``resolved_bbox`` or a screenshot region)."""
+    if isinstance(result, dict):
+        box = result.get("resolved_bbox") or result.get("region")
+        if isinstance(box, list) and len(box) == 4:
+            return [int(v) for v in box]
+    return None
 
 
 def _dispatch(engine: CuaEngine, step: TutorialStep) -> Any:

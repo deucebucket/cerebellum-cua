@@ -10,8 +10,10 @@ from cerebellum_cua.tutorial import Tutorial, run_tutorial
 class _FakeEngine:
     def __init__(self) -> None:
         self.handlers = {
-            "run_skill": lambda p: {"success": True, "action": "click",
-                                    "affected_rows": [1], "name": "Open"},
+            "run_skill": lambda p: {
+                "success": True, "action": "click", "affected_rows": [1],
+                "resolved_row_id": 1, "resolved_role": "BUTTON",
+                "resolved_name": "Open", "resolved_bbox": [0, 0, 40, 20]},
             "read_text": lambda p: {"texts": [{"row_id": 1, "text": "Open",
                                                "bbox": [0, 0, 40, 20]}], "count": 1},
         }
@@ -41,10 +43,11 @@ def test_runner_records_tokens_and_totals() -> None:
     assert out["totals"]["a11y_tokens"] == tl[0]["tokens"] + tl[1]["tokens"]
 
 
-def test_runner_records_perceived_from_result_name() -> None:
+def test_runner_records_perceived_and_bbox_from_resolved_identity() -> None:
     tut = Tutorial.from_dict({"title": "t", "steps": [
         {"caption": "click open", "action": "skill", "name": "click",
          "args": {"target": "Open"}, "hold": 1.0},
     ]})
     out = run_tutorial(_FakeEngine(), tut, clock=_clock())
-    assert out["timeline"][0]["perceived"] == "Open"
+    assert out["timeline"][0]["perceived"] == "BUTTON 'Open'"
+    assert out["timeline"][0]["bbox"] == [0, 0, 40, 20]
