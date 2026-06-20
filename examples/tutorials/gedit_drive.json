@@ -1,0 +1,27 @@
+{
+  "title": "cerebellum-cua drives gedit via the accessibility tree",
+  "steps": [
+    {"caption": "cerebellum-cua drives a real app — through the accessibility tree, not screenshots",
+     "action": "pause", "hold": 3.0},
+    {"caption": "Type into the document",
+     "action": "skill", "name": "type_into",
+     "args": {"role": "EDIT", "value": "I am cerebellum-cua. I perceive this editor through its accessibility tree."},
+     "hold": 3.5},
+    {"caption": "Re-perceive the screen",
+     "action": "op", "name": "build_matrix",
+     "args": {"target": {}, "config": {"max_depth": 14}}, "hold": 2.0},
+    {"caption": "A focused screenshot — just the Save button, not the whole screen",
+     "action": "op", "name": "screenshot", "args": {"row_id": 5}, "hold": 3.0},
+    {"caption": "Open the menu",
+     "action": "skill", "name": "click", "args": {"name": "Menu", "nth": 1}, "hold": 2.5},
+    {"caption": "Re-perceive: the menu's items now exist in the tree",
+     "action": "op", "name": "build_matrix",
+     "args": {"target": {}, "config": {"max_depth": 14}}, "hold": 2.5},
+    {"caption": "Click a menu item — Find",
+     "action": "skill", "name": "click", "args": {"name_contains": "Find"}, "hold": 3.0},
+    {"caption": "Read the screen back",
+     "action": "op", "name": "read_text", "args": {}, "hold": 2.5},
+    {"caption": "Recorded by the rig running cerebellum-cua — every action via the a11y tree",
+     "action": "pause", "hold": 3.5}
+  ]
+}
