@@ -172,6 +172,24 @@ use and whether actions move a visible cursor:
 python -m cerebellum_cua.cli --db-dsn ./state.db --secret "$SECRET" --mode vm
 ```
 
+The isolated session is brought up by [`rig/session.sh`](rig/session.sh). The
+recommended way to run it is in its container via
+[`scripts/run-vm.sh`](scripts/run-vm.sh) (only `podman` is needed on the host;
+the image bundles everything else). To run the rig **directly on a host** you
+need these system packages — `rig/session.sh` preflights them and prints the
+exact install command if any are missing:
+
+| Binary | Provides | Debian/Ubuntu | Fedora |
+| --- | --- | --- | --- |
+| `Xvfb` | virtual X display | `xvfb` | `xorg-x11-server-Xvfb` |
+| `xdpyinfo` | X readiness probe | `x11-utils` | `xorg-x11-utils` |
+| `dbus-launch` | session bus | `dbus-x11` | `dbus-x11` |
+| `openbox` | window manager | `openbox` | `openbox` |
+| `at-spi-bus-launcher` | a11y bus | `at-spi2-core` | `at-spi2-core` |
+| `ffmpeg` | record / screenshot | `ffmpeg` | `ffmpeg` |
+| `x11vnc` | VNC server (`STREAM=1` only) | `x11vnc` | `x11vnc` |
+| `websockify` | noVNC web proxy (`STREAM=1` only) | `websockify` | `python3-websockify` |
+
 To watch a `vm` session live in a browser or VNC client, `scripts/stream-vm.sh`
 serves the isolated display over localhost-bound noVNC/VNC (see the streaming
 section of [docs/MODES.md](docs/MODES.md)).

@@ -23,6 +23,15 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
+# The host only needs podman; the image bundles the rest (rig/session.sh
+# preflights its own runtime deps inside the container).
+if ! command -v podman >/dev/null 2>&1; then
+  echo "error: 'podman' is not installed. Install it (Debian/Ubuntu: " \
+       "'sudo apt-get install -y podman'; Fedora: 'sudo dnf install -y podman')," \
+       "or run rig/session.sh directly on a host with the rig deps installed." >&2
+  exit 3
+fi
+
 IMAGE="${IMAGE:-cerebellum-cua-rig}"
 OUT_DIR="${OUT_DIR:-$REPO_ROOT/rig/out}"
 APP="${APP:-gedit}"

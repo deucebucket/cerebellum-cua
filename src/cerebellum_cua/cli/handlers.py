@@ -33,9 +33,18 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
 Handler = Callable[[dict[str, Any]], dict[str, Any]]
 
 _NO_CAPTURE = (
-    "Capture backend {kind!r} is not available on this host. UIA needs Windows + "
-    "'uiautomation'; AT-SPI needs a reachable Linux a11y bus (org.a11y.Bus) with "
-    "the GI Atspi bindings. Check `available_backends()`."
+    "Capture backend {kind!r} is not available on this host, and no usable "
+    "fallback was found. Remediation:\n"
+    "- UIA (Windows): install 'uiautomation' and run on Windows.\n"
+    "- AT-SPI (Linux): the a11y bus must be reachable. Verify with `gdbus call "
+    "--session --dest org.a11y.Bus --object-path /org/a11y/bus --method "
+    "org.a11y.Bus.GetAddress`; export QT_ACCESSIBILITY=1 for Qt/KDE apps, ensure "
+    "at-spi2-core is installed, and start apps AFTER the bus is up. See "
+    "scripts/setup-linux.sh and docs/INSTALL.md.\n"
+    "- Vision (any OS): install OpenCV ('opencv-python') and Tesseract "
+    "('pytesseract' + the system 'tesseract' binary) plus a screen grabber; then "
+    "the 'auto' backend can degrade to it. Pass capture_backend:'vision' to force "
+    "it. Check `available_backends()` for what this host can actually run."
 )
 
 
@@ -83,27 +92,69 @@ class OperationHandlers:
         eng = self._engine
         target = dict(payload.get("target") or {})
         config = MatrixConfig.from_dict(payload.get("config") or {})
-        kind = str(payload.get("capture_backend") or eng.capture_backend_kind)
+        requested = str(payload.get("capture_backend") or eng.capture_backend_kind)
         epoch = eng.next_epoch()
+        degraded = False
         try:
-            backend = get_capture_backend(kind)
+            backend = get_capture_backend(requested)
             snapshot = capture_snapshot(backend, target, config, epoch)
+            used = backend.name
         except (CaptureNotAvailable, ImportError) as exc:
-            raise UIAAccessDeniedError(
-                reason="capture_unavailable",
-                detail=_NO_CAPTURE.format(kind=kind),
-            ) from exc
+            # In "auto" mode the caller asked for "whatever works", so degrade to
+            # the vision backend when it is genuinely available rather than failing
+            # the primary op outright (issue #50). A pinned backend never degrades:
+            # the caller chose a specific data shape and must be told it's missing.
+            fallback = self._vision_fallback(requested, target, config, epoch)
+            if fallback is None:
+                raise UIAAccessDeniedError(
+                    reason="capture_unavailable",
+                    detail=_NO_CAPTURE.format(kind=requested),
+                ) from exc
+            snapshot, used = fallback
+            degraded = True
         snapshot_id = eng.persist(snapshot)
-        eng.record_capture(target, config, kind)
+        eng.record_capture(target, config, used)
         self._enrich_semantics(snapshot, snapshot_id)
-        return self._build_result(snapshot, snapshot_id)
+        return self._build_result(snapshot, snapshot_id, used, degraded)
+
+    def _vision_fallback(
+        self, requested: str, target: dict[str, Any], config: MatrixConfig, epoch: int
+    ) -> tuple[Snapshot, str] | None:
+        """Capture via vision when ``auto`` degrades; ``None`` if not applicable.
+
+        Only fires for ``requested == "auto"`` and only when the vision backend
+        reports itself available, so it never silently substitutes for a pinned
+        backend and never throws past the caller's error path.
+        """
+        if requested != "auto":
+            return None
+        from cerebellum_cua.capture import (  # noqa: PLC0415
+            CaptureNotAvailable,
+            capture_snapshot,
+            get_capture_backend,
+        )
+
+        try:
+            vision = get_capture_backend("vision")
+            if not vision.is_available():
+                return None
+            snapshot = capture_snapshot(vision, target, config, epoch)
+        except (CaptureNotAvailable, ImportError):
+            return None
+        return snapshot, vision.name
 
     def register_snapshot(self, snapshot: Snapshot, snapshot_id: int) -> dict[str, Any]:
         """Persist enrichment for an already-built snapshot (test/seed entry point)."""
         self._enrich_semantics(snapshot, snapshot_id)
         return self._build_result(snapshot, snapshot_id)
 
-    def _build_result(self, snapshot: Snapshot, snapshot_id: int) -> dict[str, Any]:
+    def _build_result(
+        self,
+        snapshot: Snapshot,
+        snapshot_id: int,
+        backend_used: str | None = None,
+        degraded: bool = False,
+    ) -> dict[str, Any]:
         roots = [
             e.row_id
             for e in snapshot.elements
@@ -116,6 +167,9 @@ class OperationHandlers:
             "build_duration_ms": snapshot.build_duration_ms,
             "degraded_branches": snapshot.degraded_branches,
             "root_elements": roots,
+            "capture_backend": backend_used
+            or snapshot.metadata.get("capture_backend"),
+            "degraded": degraded,
             "status": "success",
         }
 

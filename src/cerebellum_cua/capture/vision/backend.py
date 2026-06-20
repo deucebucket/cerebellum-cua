@@ -91,6 +91,22 @@ class VisionCaptureBackend(CaptureBackend):
             return False
         return True
 
+    @classmethod
+    def _missing_deps_hint(cls) -> str:
+        """Human-actionable list of exactly which vision deps are missing."""
+        missing: list[str] = []
+        if not cls._has_grabber():
+            missing.append("a screen grabber (grim/spectacle/ffmpeg/import/scrot)")
+        if not cls._has_cv2():
+            missing.append("OpenCV ('pip install opencv-python')")
+        if not cls._has_tesseract():
+            missing.append(
+                "Tesseract ('pip install pytesseract' + the system 'tesseract' binary)"
+            )
+        if not missing:
+            return "All vision dependencies appear present."
+        return "Missing: " + "; ".join(missing) + "."
+
     # --- capture ---------------------------------------------------------
     def iter_tree(
         self, target: dict[str, Any], config: MatrixConfig
@@ -118,9 +134,24 @@ class VisionCaptureBackend(CaptureBackend):
         except ScreenshotError as exc:
             raise CaptureNotAvailable(f"vision screenshot failed: {exc}") from exc
         image = load_image(path)
+        if image is None:
+            # cv2 could not decode (or is absent): no structured capture is
+            # possible. Surface it as unavailable rather than yielding nothing,
+            # which would otherwise be persisted as a 0-element "success".
+            raise CaptureNotAvailable(
+                "vision backend could not decode the screenshot — OpenCV (cv2) "
+                "is required. " + self._missing_deps_hint()
+            )
         regions = detect_regions(image)
         elements = [self._to_element(r) for r in regions]
         elements = [e for e in elements if keep_element(e)]
+        if not elements and not self._has_tesseract():
+            # No regions AND no OCR engine: the screenshot was grabbed but nothing
+            # could be perceived. Report it instead of masking it as success.
+            raise CaptureNotAvailable(
+                "vision backend produced no elements and the Tesseract OCR engine "
+                "is unavailable. " + self._missing_deps_hint()
+            )
         yield from yield_with_containment(elements)
 
     @staticmethod

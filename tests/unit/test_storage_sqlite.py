@@ -192,6 +192,20 @@ class TestGetBackendFactory:
         assert isinstance(be, SQLiteBackend)
         assert be.path == ":memory:"
 
+    def test_sqlite_url_four_slash_is_absolute(self):
+        # sqlite:////abs/path -> absolute /abs/path (SQLAlchemy convention).
+        be = get_backend("sqlite:////tmp/cere.db")
+        assert isinstance(be, SQLiteBackend)
+        assert be.path == "/tmp/cere.db"
+
+    def test_sqlite_url_three_slash_is_relative(self):
+        # sqlite:///rel.db -> relative rel.db (one slash is the scheme separator).
+        be = get_backend("sqlite:///cere.db")
+        assert be.path == "cere.db"
+
+    def test_sqlite_url_empty_path_is_memory(self):
+        assert get_backend("sqlite://").path == ":memory:"
+
     def test_postgres_dsn_returns_postgres(self):
         be = get_backend("postgresql://u:p@localhost/matrixui")
         assert isinstance(be, PostgresBackend)
