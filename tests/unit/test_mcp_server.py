@@ -213,7 +213,8 @@ def test_screenshot_tool_routes_to_engine(server: Any, monkeypatch: Any) -> None
 
     monkeypatch.setattr(
         shot, "grab_screenshot",
-        lambda path, display=None: {"path": path, "width": 1920, "height": 1080},
+        lambda path, display=None, region=None: {
+            "path": path, "width": 1920, "height": 1080},
     )
     screenshot = _tools_by_name(server)["screenshot"].fn
     result = screenshot(path="/tmp/x.png")

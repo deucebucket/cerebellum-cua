@@ -310,14 +310,15 @@ class OperationHandlers:
 
     # --- screenshot (opt-in on-demand visual capture) -------------------
     def screenshot(self, payload: dict[str, Any]) -> dict[str, Any]:
-        """Grab one screenshot of the screen and return its path + dimensions.
+        """Grab a screenshot (optionally cropped to a region/element) + dims.
 
-        This is the opt-in, on-demand half of hybrid vision — NOT part of
-        ``build_matrix`` (capture stays screenshot-free by default). Payload
-        keys: ``path`` (optional destination PNG; a temp path is used when
-        absent) and ``display`` (optional X11 display override). On a host with
-        no grabber the call raises a typed ``1006`` (``UIA_ACCESS_DENIED``)
-        rather than crashing.
+        The opt-in, on-demand half of hybrid vision — NOT part of ``build_matrix``.
+        Scope is optional and mutually exclusive: ``region`` ``[x,y,w,h]`` crops to
+        an explicit rect; ``row_id`` (+ optional ``snapshot_id``) crops to that
+        element's stored ``bounding_rect`` (cheap "look at just this widget"). No
+        scope -> full screen, unchanged. Other keys: ``path`` (destination PNG;
+        temp if absent), ``display`` (X11 override). On a host with no grabber a
+        typed ``1006`` (``UIA_ACCESS_DENIED``) is raised rather than crashing.
         """
         from cerebellum_cua.capture.screenshot import (  # noqa: PLC0415
             ScreenshotError,
@@ -327,12 +328,34 @@ class OperationHandlers:
 
         path = str(payload.get("path") or default_screenshot_path())
         display = payload.get("display")
+        region = self._resolve_region(payload)
         try:
-            return grab_screenshot(path, display=display)
+            return grab_screenshot(path, display=display, region=region)
         except ScreenshotError as exc:
             raise UIAAccessDeniedError(
                 reason="screenshot_unavailable", detail=str(exc)
             ) from exc
+
+    def _resolve_region(
+        self, payload: dict[str, Any]
+    ) -> tuple[int, int, int, int] | None:
+        """Resolve an optional capture region from ``region`` or ``row_id``."""
+        region = payload.get("region")
+        if region is not None:
+            x, y, w, h = (int(v) for v in region)
+            return (x, y, w, h)
+        if payload.get("row_id") is None:
+            return None
+        snapshot_id = self._snapshot_id(payload)
+        element = self._engine.storage.get_element(
+            snapshot_id, int(payload["row_id"])
+        )
+        if element is None:
+            raise ElementNotFoundError(
+                snapshot_id=snapshot_id, row_id=int(payload["row_id"])
+            )
+        r = element.bounding_rect
+        return (int(r.left), int(r.top), int(r.width), int(r.height))
 
     # --- list_windows (authoritative desktop window state) --------------
     def list_windows(self, payload: dict[str, Any]) -> dict[str, Any]:

@@ -553,3 +553,42 @@ def test_engine_is_context_manager() -> None:
     with CuaEngine(db_dsn=None, secret=SECRET) as eng:
         result = eng.register_seed(_window_with_button(epoch=1))
         assert result["status"] == "success"
+
+
+def test_screenshot_row_id_crops_to_element_bbox(
+    engine: CuaEngine, monkeypatch: Any
+) -> None:
+    import cerebellum_cua.capture.screenshot as shot
+
+    seen: dict[str, Any] = {}
+
+    def _fake_grab(path: str, display: Any = None, region: Any = None) -> dict:
+        seen["region"] = region
+        return {"path": path, "width": 40, "height": 20,
+                "region": list(region) if region else None, "region_applied": True}
+
+    monkeypatch.setattr(shot, "grab_screenshot", _fake_grab)
+    sid = engine.register_seed(_window_with_button(epoch=1))["snapshot_id"]
+    # row 1 is the button; _elem default bbox is left:0 top:0 width:40 height:20.
+    resp = _call(engine, "screenshot", {"snapshot_id": sid, "row_id": 1})
+    assert resp["error"] is None
+    assert seen["region"] == (0, 0, 40, 20)
+    assert resp["payload"]["region"] == [0, 0, 40, 20]
+
+
+def test_screenshot_explicit_region_passed_through(
+    engine: CuaEngine, monkeypatch: Any
+) -> None:
+    import cerebellum_cua.capture.screenshot as shot
+
+    seen: dict[str, Any] = {}
+
+    def _fake_grab(path: str, display: Any = None, region: Any = None) -> dict:
+        seen["region"] = region
+        return {"path": path, "width": 5, "height": 6, "region": list(region),
+                "region_applied": True}
+
+    monkeypatch.setattr(shot, "grab_screenshot", _fake_grab)
+    resp = _call(engine, "screenshot", {"region": [3, 4, 5, 6]})
+    assert resp["error"] is None
+    assert seen["region"] == (3, 4, 5, 6)
